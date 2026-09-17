@@ -201,7 +201,7 @@ defmodule NervesMCP.CLI do
 
     children = [
       NervesMCP.History,
-      {Bandit, plug: NervesMCP.Router, port: mcp_port},
+      {Bandit, plug: NervesMCP.Router, port: mcp_port, ip: :loopback},
       connection_child,
       NervesMCP.DeviceProbe
     ]
