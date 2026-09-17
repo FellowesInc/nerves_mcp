@@ -69,6 +69,29 @@ defmodule NervesMCP.HistoryTest do
     assert {"", _cursor} = History.since(nil)
   end
 
+  # The wrapper carries the code as base64 in a heredoc, so its echo has
+  # unindented lines and can't be dropped backwards from `end).()`.
+  test "a base64 payload echo is filtered out, and output after it survives" do
+    History.push("""
+    iex(4)> (fn ->\r
+    ...(4)>   result = try do\r
+    ...(4)>     {value, _binding} = Code.eval_string(Base.decode64!(~S\"\"\"\r
+    c3Bhd24oZm4gLT4gUHJvY2Vzcy5zbGVlcCgzMDApOyBJTy5wdXRzKCJMQVRFIE9VVFBVVCIpIGVu\r
+    ZCk=\r
+    \"\"\", ignore: :whitespace))\r
+    ...(4)>   end\r
+    ...(4)>   IO.puts("876070A7AA961484_START")\r
+    ...(4)>   IO.puts("876070A7AA961484_END")\r
+    ...(4)> end).()\r
+    876070A7AA961484_START\r
+    #PID<0.281.0>\r
+    876070A7AA961484_END\r
+    LATE OUTPUT\r
+    """)
+
+    assert {"LATE OUTPUT", _cursor} = History.since(nil)
+  end
+
   test "output printed outside an eval survives the filter" do
     History.push("iex(13)> \b\b\b\b" <> @redraw <> "LATE OUTPUT\r\n" <> "iex(13)> \r\n")
 

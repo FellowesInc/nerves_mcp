@@ -82,7 +82,7 @@ defmodule NervesMCP.History do
     |> String.replace(@ansi, "")
     |> String.replace(["\b", "\a"], "")
     |> String.split(~r/\r\n|\r|\n/)
-    |> Enum.reduce(%{kept: [], fencing: nil}, &take_line/2)
+    |> Enum.reduce(%{kept: [], fencing: nil, echoing: false}, &take_line/2)
     |> Map.fetch!(:kept)
     |> Enum.reverse()
     |> Enum.join("\n")
@@ -97,7 +97,13 @@ defmodule NervesMCP.History do
         if trimmed == state.fencing <> "_END", do: %{state | fencing: nil}, else: state
 
       match = Regex.run(@marker_start, trimmed) ->
-        %{state | fencing: Enum.at(match, 1)}
+        %{state | fencing: Enum.at(match, 1), echoing: false}
+
+      state.echoing ->
+        %{state | echoing: trimmed != @wrapper_end}
+
+      trimmed == @wrapper_start ->
+        %{state | echoing: true}
 
       Regex.match?(@marker, trimmed) ->
         state
@@ -113,8 +119,8 @@ defmodule NervesMCP.History do
     end
   end
 
-  # Drops the wrapper's own echo backwards from its `end).()`. The body is
-  # always indented, so a redraw that starts mid-block is caught too.
+  # Fallback for an echo whose `(fn ->` was cut by a redraw: drop backwards from
+  # `end).()` while the lines are indented, which the wrapper body always is.
   defp drop_echo([line | rest]) do
     cond do
       String.trim(line) == @wrapper_start -> rest
