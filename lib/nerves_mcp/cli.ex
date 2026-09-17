@@ -14,17 +14,44 @@ defmodule NervesMCP.CLI do
   **SSH:**
       nerves_mcp nerves.local
       nerves_mcp --ssh nerves.local --user root --ssh-port 22
+      nerves_mcp nerves.local --fallback-host 192.168.1.252
 
   Common options:
       --port PORT    MCP server port (default: 13000)
+      --no-repl      Don't read stdin; block instead
+
+  Without `--no-repl` the foreground is `repl/0`, an `IO.gets` loop that
+  returns on stdin EOF and takes the VM with it. `--no-repl` blocks forever
+  instead, so the server survives EOF and can run from a background shell or
+  under a process supervisor.
   """
 
   @serial_patterns ["/dev/tty", "/dev/cu.", "/dev/serial"]
 
+  @typedoc "Parsed CLI configuration, as stored in the application env."
+  @type config() :: %{
+          connection: keyword(),
+          mcp_port: pos_integer(),
+          repl?: boolean()
+        }
+
   @spec main([String.t()]) :: :ok
   def main(args) do
-    run(args)
-    repl()
+    args
+    |> run()
+    |> serve()
+  end
+
+  @doc """
+  Block on the configured foreground: the stdin repl, or forever under
+  `--no-repl`.
+  """
+  @spec serve(config()) :: :ok
+  def serve(%{repl?: true}), do: repl()
+
+  def serve(%{repl?: false}) do
+    IO.puts("Running with --no-repl. Ctrl-C to stop.")
+    Process.sleep(:infinity)
   end
 
   @spec repl() :: :ok
@@ -52,8 +79,30 @@ defmodule NervesMCP.CLI do
   defp handle_command(""), do: :ok
   defp handle_command(other), do: IO.puts("Unknown command: #{other}. Type 'help' for commands.")
 
-  @spec run([String.t()]) :: :ok | nil
+  @doc """
+  Parse args into the application env, then start the children.
+  """
+  @spec run([String.t()]) :: config()
   def run(args) do
+    config = configure(args)
+
+    start_children(config.connection, config.mcp_port)
+
+    IO.puts(
+      "NervesMCP started on port #{config.mcp_port} via #{connection_desc(config.connection)}"
+    )
+
+    maybe_print_claude_hint(config.mcp_port)
+
+    config
+  end
+
+  @doc """
+  Parse args, merge them over `config/config.exs` and store the result in the
+  application env. Starts nothing.
+  """
+  @spec configure([String.t()]) :: config()
+  def configure(args) do
     {opts, positional, _} =
       OptionParser.parse(args,
         strict: [
@@ -63,7 +112,9 @@ defmodule NervesMCP.CLI do
           speed: :integer,
           user: :string,
           ssh_port: :integer,
-          pass: :string
+          pass: :string,
+          fallback_host: :string,
+          no_repl: :boolean
         ],
         aliases: [
           p: :port,
@@ -79,20 +130,28 @@ defmodule NervesMCP.CLI do
     Application.put_env(:nerves_mcp, :connection, connection)
     Application.put_env(:nerves_mcp, :port, mcp_port)
 
-    start_children(connection, mcp_port)
+    %{
+      connection: connection,
+      mcp_port: mcp_port,
+      repl?: not Keyword.get(opts, :no_repl, false)
+    }
+  end
 
-    connection_desc =
-      case Keyword.fetch!(connection, :type) do
-        :uart ->
-          "serial #{Keyword.fetch!(connection, :port)} @ #{Keyword.get(connection, :speed, 115_200)}"
+  defp connection_desc(connection) do
+    case Keyword.fetch!(connection, :type) do
+      :uart ->
+        "serial #{Keyword.fetch!(connection, :port)} @ #{Keyword.get(connection, :speed, 115_200)}"
 
-        :ssh ->
-          "ssh #{Keyword.get(connection, :user, "root")}@#{Keyword.fetch!(connection, :host)}:#{Keyword.get(connection, :port, 22)}"
-      end
+      :ssh ->
+        "ssh #{Keyword.get(connection, :user, "root")}@#{Keyword.fetch!(connection, :host)}:#{Keyword.get(connection, :port, 22)}#{fallback_desc(connection)}"
+    end
+  end
 
-    IO.puts("NervesMCP started on port #{mcp_port} via #{connection_desc}")
-
-    maybe_print_claude_hint(mcp_port)
+  defp fallback_desc(connection) do
+    case Keyword.get(connection, :fallback_host) do
+      nil -> ""
+      host -> " (fallback #{host})"
+    end
   end
 
   defp maybe_print_claude_hint(mcp_port) do
@@ -134,17 +193,20 @@ defmodule NervesMCP.CLI do
         Examples:
           nerves_mcp /dev/ttyUSB0                   # Serial connection
           nerves_mcp /dev/ttyUSB0 --speed 9600      # Serial with custom baud rate
-          nerves_mcp nerves.local                    # SSH connection
-          nerves_mcp nerves.local --user root        # SSH with custom user
-          nerves_mcp --serial /dev/ttyACM0           # Explicit serial
-          nerves_mcp --ssh 192.168.1.100             # Explicit SSH
+          nerves_mcp nerves.local                   # SSH connection
+          nerves_mcp nerves.local --user root       # SSH with custom user
+          nerves_mcp nerves.local --no-repl         # No stdin console
+          nerves_mcp --serial /dev/ttyACM0          # Explicit serial
+          nerves_mcp --ssh 192.168.1.100            # Explicit SSH
 
         Options:
-          --port PORT        MCP server port (default: 13000)
-          --speed BAUD       Serial baud rate (default: 115200)
-          --user USER        SSH user (default: root)
-          --ssh-port PORT    SSH port (default: 22)
-          --pass PASSWORD    SSH password (requires sshpass; not for high-security use)
+          --port PORT           MCP server port (default: 13000)
+          --speed BAUD          Serial baud rate (default: 115200)
+          --user USER           SSH user (default: root)
+          --ssh-port PORT       SSH port (default: 22)
+          --pass PASSWORD       SSH password (requires sshpass; not for high-security use)
+          --fallback-host HOST  Second SSH host to try when the first won't resolve
+          --no-repl             Don't read stdin, block instead (for background runs)
 
         Connection can also be configured in config/config.exs.
         CLI arguments override config values.
@@ -186,6 +248,7 @@ defmodule NervesMCP.CLI do
     |> maybe_put(:user, Keyword.get(opts, :user))
     |> maybe_put(:port, Keyword.get(opts, :ssh_port))
     |> maybe_put(:pass, Keyword.get(opts, :pass))
+    |> maybe_put(:fallback_host, Keyword.get(opts, :fallback_host))
   end
 
   defp maybe_put(config, _key, nil), do: config
