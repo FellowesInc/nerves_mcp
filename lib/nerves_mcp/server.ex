@@ -17,7 +17,7 @@ defmodule NervesMCP.Server do
   alias NervesMCP.Tools
 
   @base [Tools.IsDeviceUp, Tools.IsDeviceUpdatedTo, Tools.DeviceStatus]
-  @device [Tools.GrepRingLogger, Tools.GrepDmesg]
+  @device [Tools.GrepRingLogger, Tools.GrepDmesg, Tools.DeviceOutput]
 
   @instructions """
   Tools for interacting with a connected Nerves device over serial or SSH.
@@ -27,6 +27,9 @@ defmodule NervesMCP.Server do
   device: while the device is down they return a "Device is down" error, so use
   `is_device_up` / `is_device_updated_to` to wait for it to come back after a
   reboot or firmware update, then retry.
+
+  `device_output` reads what the device printed into the session, which is the
+  only way to see output from a process spawned by an earlier `device_eval`.
 
   On a serial that responds but does not run Elixir, `device_eval` and
   `device_eval_output` take a raw shell command instead. `device_status` reports

@@ -12,6 +12,7 @@ defmodule NervesMCP.ServerTest do
       Enum.sort([
         "device_eval",
         "device_eval_output",
+        "device_output",
         "device_status",
         "grep_dmesg",
         "grep_ring_logger",
