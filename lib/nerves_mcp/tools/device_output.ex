@@ -6,6 +6,9 @@ defmodule NervesMCP.Tools.DeviceOutput do
   spawned process, a GenServer or the logger prints afterwards is invisible to
   it. That output is still buffered by `NervesMCP.History`, and this is how to
   read it.
+
+  One gap: a line printed while an eval's result is crossing the link is
+  dropped with the result. See the known limitation in `NervesMCP.History`.
   """
 
   @behaviour EMCP.Tool
@@ -18,7 +21,7 @@ defmodule NervesMCP.Tools.DeviceOutput do
   @impl EMCP.Tool
   def description(),
     do:
-      "Read output the device printed into the session, including from processes spawned by an earlier device_eval. Pass the cursor from the previous call to read only what is new."
+      "Read output the device printed into the session, including from processes spawned by an earlier device_eval. Pass the cursor from the previous call to read only what is new. A line printed in the moment an eval's result was being written back is dropped with that result and will not appear here."
 
   @impl EMCP.Tool
   def input_schema() do

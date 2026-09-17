@@ -107,4 +107,26 @@ defmodule NervesMCP.HistoryTest do
 
     assert {"LATE OUTPUT", _cursor} = History.since(nil)
   end
+
+  # A spawned process printing `:ok` or `nil` is the whole point of
+  # device_output, so only the pair that follows the closing marker is dropped.
+  test "an :ok printed away from an eval survives the filter" do
+    History.push("iex(13)> \r\n:ok\r\nnil\r\n")
+
+    assert {":ok\nnil", _cursor} = History.since(nil)
+  end
+
+  test "the wrapper's :ok and nil are dropped, an :ok after them is kept" do
+    History.push("""
+    876070A7AA961484_START\r
+    42\r
+    876070A7AA961484_END\r
+    :ok\r
+    iex(5)> \r
+    nil\r
+    :ok\r
+    """)
+
+    assert {":ok", _cursor} = History.since(nil)
+  end
 end
