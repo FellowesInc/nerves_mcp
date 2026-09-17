@@ -135,8 +135,8 @@ defmodule NervesMCP.Tools.GrepRingLogger do
       tail = #{tail_literal}
 
       # What a pattern matches against. The application and module are in here
-      # because a grep for an app name like telit_modem is the common case, and
-      # they cost nothing next to formatting.
+      # because grepping for an app name is the common case, and they cost
+      # nothing next to formatting.
       match_text = fn entry ->
         {message, module, metadata} =
           case entry do
