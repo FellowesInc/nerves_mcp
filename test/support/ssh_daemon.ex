@@ -48,10 +48,14 @@ defmodule NervesMCP.Test.SSHDaemon do
   Point `NervesMCP.Connection.SSH` at the daemon and start it, returning its pid.
 
   Waits for the remote IEx to answer, since the connection's `init/1` returns as soon
-  as the ssh port opens.
+  as the ssh port opens. The `:connection` env is application-wide, so it is put back
+  when the test ends and the next test doesn't inherit a stopped daemon's port.
   """
   @spec connect(t()) :: pid()
   def connect(daemon) do
+    previous = Application.fetch_env(:nerves_mcp, :connection)
+    ExUnit.Callbacks.on_exit(fn -> restore_connection(previous) end)
+
     Application.put_env(:nerves_mcp, :connection,
       type: :ssh,
       host: "127.0.0.1",
@@ -63,6 +67,11 @@ defmodule NervesMCP.Test.SSHDaemon do
     await_shell(20)
     pid
   end
+
+  defp restore_connection({:ok, config}),
+    do: Application.put_env(:nerves_mcp, :connection, config)
+
+  defp restore_connection(:error), do: Application.delete_env(:nerves_mcp, :connection)
 
   defp await_shell(0), do: raise("the test daemon's IEx never answered")
 
