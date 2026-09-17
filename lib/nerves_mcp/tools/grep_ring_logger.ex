@@ -2,14 +2,66 @@ defmodule NervesMCP.Tools.GrepRingLogger do
   @moduledoc """
   Grep the device's RingLogger buffer.
 
-  Fetches log entries from `RingLogger.get/1` on the connected device,
-  formats each entry as `[level] message`, and returns lines matching
-  the given pattern. Optionally limits the output to the last N matches.
+  Fetches log entries from `RingLogger.get/1` on the connected device, formats
+  each one as `timestamp [level] message`, and returns the lines matching the
+  given pattern. Optionally limits the output to the last N matches.
+
+  The formatting and the filtering both run on the device, so only the matches
+  cross the link.
   """
 
   @behaviour EMCP.Tool
 
   alias NervesMCP.Tools.Device
+
+  # Runs on the device, so it is source rather than a function: RingLogger 0.8+
+  # returns entry maps, and the older {level, {logger, message, timestamp,
+  # metadata}} tuple is kept as a fallback. Anything else is inspected, which is
+  # what every entry used to fall through to.
+  @entry_formatter """
+  (fn ->
+     pad = fn number, width ->
+       number |> Integer.to_string() |> String.pad_leading(width, "0")
+     end
+
+     stamp = fn
+       {{year, month, day}, {hour, minute, second, millisecond}} ->
+         pad.(year, 4) <> "-" <> pad.(month, 2) <> "-" <> pad.(day, 2) <> " " <>
+           pad.(hour, 2) <> ":" <> pad.(minute, 2) <> ":" <> pad.(second, 2) <> "." <>
+           pad.(millisecond, 3)
+
+       {{year, month, day}, {hour, minute, second}} ->
+         pad.(year, 4) <> "-" <> pad.(month, 2) <> "-" <> pad.(day, 2) <> " " <>
+           pad.(hour, 2) <> ":" <> pad.(minute, 2) <> ":" <> pad.(second, 2)
+
+       other ->
+         inspect(other)
+     end
+
+     text = fn message ->
+       try do
+         IO.iodata_to_binary(message)
+       rescue
+         _ -> inspect(message)
+       end
+     end
+
+     line = fn level, message, timestamp ->
+       stamp.(timestamp) <> " [" <> to_string(level) <> "] " <> text.(message)
+     end
+
+     fn
+       %{level: level, message: message, timestamp: timestamp} ->
+         line.(level, message, timestamp)
+
+       {level, {_logger, message, timestamp, _metadata}} ->
+         line.(level, message, timestamp)
+
+       other ->
+         inspect(other)
+     end
+   end).()\
+  """
 
   @impl EMCP.Tool
   def name(), do: "grep_ring_logger"
@@ -59,11 +111,25 @@ defmodule NervesMCP.Tools.GrepRingLogger do
     end
   end
 
+  @doc """
+  Format one RingLogger entry the way the device-side code does.
+
+  The formatter has to run on the device, so it lives as source in
+  `@entry_formatter` and this evaluates that same source. The tests exercise it
+  here rather than over a link.
+  """
+  @spec format_entry(term()) :: String.t()
+  def format_entry(entry) do
+    {formatter, _binding} = Code.eval_string(@entry_formatter)
+    formatter.(entry)
+  end
+
   defp build_code(pattern, regex?, tail) do
     tail_literal = if is_integer(tail), do: Integer.to_string(tail), else: "nil"
 
     """
     (fn ->
+      format = #{@entry_formatter}
       pattern = #{inspect(pattern)}
       regex? = #{regex?}
       tail = #{tail_literal}
@@ -94,20 +160,7 @@ defmodule NervesMCP.Tools.GrepRingLogger do
         list when is_list(list) ->
           lines =
             list
-            |> Enum.map(fn
-              {level, {_logger, msg, _ts, _meta}} ->
-                formatted =
-                  try do
-                    IO.iodata_to_binary(msg)
-                  rescue
-                    _ -> inspect(msg)
-                  end
-
-                "[" <> to_string(level) <> "] " <> formatted
-
-              other ->
-                inspect(other)
-            end)
+            |> Enum.map(format)
             |> Enum.filter(matcher)
 
           lines = if tail, do: Enum.take(lines, -tail), else: lines
