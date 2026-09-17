@@ -134,6 +134,39 @@ defmodule NervesMCP.Tools.GrepRingLogger do
       regex? = #{regex?}
       tail = #{tail_literal}
 
+      # What a pattern matches against. The application and module are in here
+      # because a grep for an app name like telit_modem is the common case, and
+      # they cost nothing next to formatting.
+      match_text = fn entry ->
+        {message, module, metadata} =
+          case entry do
+            %{message: message, module: module, metadata: metadata} ->
+              {message, module, metadata}
+
+            {_level, {_logger, message, _timestamp, metadata}} ->
+              {message, nil, metadata}
+
+            other ->
+              {inspect(other), nil, []}
+          end
+
+        text =
+          try do
+            IO.iodata_to_binary(message)
+          rescue
+            _ -> inspect(message)
+          end
+
+        application =
+          cond do
+            is_list(metadata) -> Keyword.get(metadata, :application)
+            is_map(metadata) -> Map.get(metadata, :application)
+            true -> nil
+          end
+
+        text <> " " <> inspect(module) <> " " <> inspect(application)
+      end
+
       matcher =
         if regex? do
           re = Regex.compile!(pattern)
@@ -158,12 +191,9 @@ defmodule NervesMCP.Tools.GrepRingLogger do
           IO.puts("Error fetching RingLogger entries: " <> msg)
 
         list when is_list(list) ->
-          lines =
-            list
-            |> Enum.map(format)
-            |> Enum.filter(matcher)
-
-          lines = if tail, do: Enum.take(lines, -tail), else: lines
+          matches = Enum.filter(list, fn entry -> matcher.(match_text.(entry)) end)
+          matches = if tail, do: Enum.take(matches, -tail), else: matches
+          lines = Enum.map(matches, format)
           Enum.each(lines, &IO.puts/1)
           length(lines)
       end

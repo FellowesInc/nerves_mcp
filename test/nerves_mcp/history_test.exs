@@ -92,6 +92,16 @@ defmodule NervesMCP.HistoryTest do
     assert {"LATE OUTPUT", _cursor} = History.since(nil)
   end
 
+  # Captured from a device, where the prompt carries the node name and counter.
+  test "a device prompt is filtered out" do
+    History.push(
+      "iex(bionic_eye_EC01@nerves.local)18> \r\n" <>
+        "iex(bionic_eye_EC01@nerves.local)19> bg-hello from device\r\n"
+    )
+
+    assert {"bg-hello from device", _cursor} = History.since(nil)
+  end
+
   test "output printed outside an eval survives the filter" do
     History.push("iex(13)> \b\b\b\b" <> @redraw <> "LATE OUTPUT\r\n" <> "iex(13)> \r\n")
 

@@ -16,7 +16,8 @@ defmodule NervesMCP.History do
   @marker ~r/\b[0-9A-F]{16}_(?:START|END)\b/
   @marker_start ~r/^([0-9A-F]{16})_START$/
   @ansi ~r/\e\[[0-9;?]*[ -\/]*[@-~]/
-  @prompt ~r/^(?:iex|\.\.\.)(?:\([^)]*\))?>\s?/
+  # A device prompt carries the node name and the counter: `iex(node@host)18>`.
+  @prompt ~r/^(?:iex|\.\.\.)(?:\([^)]*\))?\d*>\s?/
   @wrapper_end "end).()"
   @wrapper_start "(fn ->"
 
