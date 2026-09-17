@@ -5,9 +5,9 @@ defmodule NervesMCP.ServerTest do
 
   defp names(mode), do: mode |> Server.tools_for() |> Enum.map(& &1.name()) |> Enum.sort()
 
-  @every_mode [:nerves, :elixir, :shell, :down, :unknown]
+  @elixir_modes [:nerves, :elixir, :down, :unknown]
 
-  test "every mode lists the same tool names" do
+  test "every mode that could be running Elixir lists the same tool names" do
     expected =
       Enum.sort([
         "device_eval",
@@ -20,9 +20,25 @@ defmodule NervesMCP.ServerTest do
         "is_device_updated_to"
       ])
 
-    for mode <- @every_mode do
+    for mode <- @elixir_modes do
       assert names(mode) == expected, "#{mode} listed #{inspect(names(mode))}"
     end
+  end
+
+  # grep_ring_logger needs a running Elixir, so listing it against a serial that
+  # has none advertises work it cannot do. grep_dmesg only needs `dmesg` and
+  # dispatches through the shell, so it stays.
+  test "shell mode drops grep_ring_logger and keeps grep_dmesg" do
+    assert names(:shell) ==
+             Enum.sort([
+               "device_eval",
+               "device_eval_output",
+               "device_output",
+               "device_status",
+               "grep_dmesg",
+               "is_device_up",
+               "is_device_updated_to"
+             ])
   end
 
   # The regression this list fixes: after a reboot device_eval vanished from the

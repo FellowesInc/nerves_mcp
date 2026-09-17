@@ -5,10 +5,15 @@ defmodule NervesMCP.Tools.GrepDmesg do
   Runs `dmesg` via `:os.cmd/1` on the device, splits the output into lines,
   and returns lines matching the given pattern. Optionally limits the
   output to the last N matches.
+
+  In `:shell` mode there is no Elixir to run that in, so the same work goes
+  over as a `dmesg | grep` pipeline instead. `dmesg` is all this tool needs, so
+  a serial that only has a shell can still use it.
   """
 
   @behaviour EMCP.Tool
 
+  alias NervesMCP.DeviceProbe
   alias NervesMCP.Tools.Device
 
   @impl EMCP.Tool
@@ -51,13 +56,42 @@ defmodule NervesMCP.Tools.GrepDmesg do
     tail = args["tail"]
     timeout = args["timeout"] || 15_000
 
-    code = build_code(pattern, regex?, tail)
+    result =
+      case request(DeviceProbe.mode(), pattern, regex?, tail) do
+        {:eval_output, code} -> Device.eval_output(code, timeout)
+        {:shell_eval_output, command} -> Device.shell_eval_output(command, timeout)
+      end
 
-    case Device.eval_output(code, timeout) do
+    case result do
       {:ok, output} -> EMCP.Tool.response([%{"type" => "text", "text" => output}])
       {:error, reason} -> EMCP.Tool.error(reason)
     end
   end
+
+  @doc """
+  The `NervesMCP.Tools.Device` call a mode dispatches to, and the code for it.
+
+  Both forms have to run on the far end, so this is the seam the tests use
+  rather than a link.
+  """
+  @spec request(DeviceProbe.mode(), String.t(), boolean(), integer() | nil) ::
+          {:eval_output | :shell_eval_output, String.t()}
+  def request(:shell, pattern, regex?, tail),
+    do: {:shell_eval_output, build_command(pattern, regex?, tail)}
+
+  def request(_mode, pattern, regex?, tail),
+    do: {:eval_output, build_code(pattern, regex?, tail)}
+
+  # grep -E is the closest a shell gets to an Elixir regex, and -F pins a plain
+  # substring so a `.` or `*` in the pattern stays literal.
+  defp build_command(pattern, regex?, tail) do
+    grep = if regex?, do: "grep -E --", else: "grep -F --"
+    command = "dmesg | #{grep} #{shell_quote(pattern)}"
+
+    if is_integer(tail), do: command <> " | tail -n #{tail}", else: command
+  end
+
+  defp shell_quote(string), do: "'" <> String.replace(string, "'", "'\\''") <> "'"
 
   defp build_code(pattern, regex?, tail) do
     tail_literal = if is_integer(tail), do: Integer.to_string(tail), else: "nil"
