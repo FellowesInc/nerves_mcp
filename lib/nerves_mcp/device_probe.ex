@@ -220,7 +220,6 @@ defmodule NervesMCP.DeviceProbe do
   defp classify(:down), do: {:down, "no response from device"}
   defp classify(:busy), do: {:busy, "device busy (evaluation in flight)"}
   defp classify({:error, reason}), do: {:unknown, "probe error: #{inspect(reason)}"}
-  defp classify(other), do: {:unknown, "unexpected probe result: #{inspect(other)}"}
 
   # Don't overwrite a known mode just because the device was momentarily busy.
   defp apply_result(state, {:busy, _detail}), do: state
