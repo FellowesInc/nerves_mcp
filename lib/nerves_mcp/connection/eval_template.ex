@@ -5,9 +5,19 @@ defmodule NervesMCP.Connection.EvalTemplate do
   One call is one expression. It prints `<marker>_START`, the result, then
   `<marker>_END`, and the transport feeds received bytes to a `Matcher` until it
   answers `{:done, result}`.
+
+  User code travels as base64 broken across short lines. The remote line editor
+  truncates a single line longer than about 4 KB, and the truncation reaches the
+  compiler as `"aaa..." <> ...`, which fails with `undefined function .../0`.
+  Short lines are not truncated, and base64 also keeps quoting and non-UTF8
+  bytes out of the picture.
   """
 
   alias NervesMCP.Connection.EvalTemplate.Matcher
+
+  # Well under the ~4 KB the remote line editor tolerates, and a multiple of 4 so
+  # each line is whole base64 groups.
+  @line_width 76
 
   @type style() :: :elixir | :shell
 
@@ -130,7 +140,18 @@ defmodule NervesMCP.Connection.EvalTemplate do
   @spec matcher(String.t(), style(), keyword()) :: Matcher.t()
   defdelegate matcher(marker, style, opts \\ []), to: Matcher, as: :new
 
-  defp payload(code), do: inspect(code)
+  # The user's code as an expression that reconstructs it on the device.
+  defp payload(code) do
+    lines = code |> Base.encode64() |> chunk_lines()
+
+    ~s|Base.decode64!(~S"""\n#{lines}\n""", ignore: :whitespace)|
+  end
+
+  defp chunk_lines(base64) when byte_size(base64) <= @line_width, do: base64
+
+  defp chunk_lines(<<line::binary-size(@line_width), rest::binary>>) do
+    line <> "\n" <> chunk_lines(rest)
+  end
 end
 
 defmodule NervesMCP.Connection.EvalTemplate.Matcher do

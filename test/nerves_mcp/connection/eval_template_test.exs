@@ -5,12 +5,38 @@ defmodule NervesMCP.Connection.EvalTemplateTest do
   alias NervesMCP.Connection.EvalTemplate.Matcher
 
   describe "wrapping" do
-    test "the wrapped code prints the markers around the result" do
-      wrapped = EvalTemplate.eval(~s|IO.puts("hi")|, "ABCD")
+    test "the wrapped code is a single expression that carries the code as base64" do
+      code = ~s|IO.puts("hi")|
+      wrapped = EvalTemplate.eval(code, "ABCD")
 
       assert wrapped =~ ~s|IO.puts("ABCD_START")|
       assert wrapped =~ ~s|IO.puts("ABCD_END")|
-      assert wrapped =~ "Code.eval_string("
+      assert decoded_payload(wrapped) == code
+    end
+
+    test "eval_output carries the same payload" do
+      code = ~s|IO.puts("hi")|
+
+      assert decoded_payload(EvalTemplate.eval_output(code, "ABCD")) == code
+    end
+
+    # A 5 KB module used to arrive truncated, because the remote line editor cuts a
+    # single long line short.
+    test "a large payload is broken into lines no wider than 76 bytes" do
+      code = String.duplicate("x = 1\n", 4_000)
+      wrapped = EvalTemplate.eval(code, "ABCD")
+
+      assert decoded_payload(wrapped) == code
+
+      assert wrapped
+             |> String.split("\n")
+             |> Enum.all?(&(byte_size(&1) <= 76))
+    end
+
+    test "quotes, backslashes and non-UTF8 bytes survive the round trip" do
+      code = ~S|x = "a\"b\\c" <> <<0xFF, 0x00>>|
+
+      assert decoded_payload(EvalTemplate.eval(code, "ABCD")) == code
     end
 
     test "markers are 16 hex characters and do not repeat" do
@@ -93,5 +119,13 @@ defmodule NervesMCP.Connection.EvalTemplateTest do
         {:cont, matcher} -> {:cont, {:cont, matcher}}
       end
     end)
+  end
+
+  # What the device would decode back out of the wrapped expression.
+  defp decoded_payload(wrapped) do
+    [_, rest] = String.split(wrapped, ~s|~S"""\n|, parts: 2)
+    [base64, _] = String.split(rest, ~s|\n"""|, parts: 2)
+
+    Base.decode64!(base64, ignore: :whitespace)
   end
 end
