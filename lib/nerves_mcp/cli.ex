@@ -138,7 +138,10 @@ defmodule NervesMCP.CLI do
     existing_config = Application.get_env(:nerves_mcp, :connection, [])
     connection = resolve_connection(opts, positional, existing_config)
 
-    mcp_port = Keyword.get(opts, :port, Application.get_env(:nerves_mcp, :port, 13000))
+    mcp_port =
+      opts
+      |> Keyword.get(:port, Application.get_env(:nerves_mcp, :port, 13000))
+      |> validate_mcp_port!()
 
     Application.put_env(:nerves_mcp, :connection, connection)
     Application.put_env(:nerves_mcp, :port, mcp_port)
@@ -148,6 +151,17 @@ defmodule NervesMCP.CLI do
       mcp_port: mcp_port,
       repl?: not Keyword.get(opts, :no_repl, false)
     }
+  end
+
+  # Bandit accepts 0 as "any free port", but then the startup banner and the
+  # `claude mcp add` hint both print 0 and nobody can reach the server. Rejected
+  # along with the rest of the out-of-range values.
+  defp validate_mcp_port!(port) when is_integer(port) and port in 1..65_535, do: port
+
+  defp validate_mcp_port!(port) do
+    raise ArgumentError,
+          "invalid MCP port #{inspect(port)}, expected an integer in 1..65535 " <>
+            "(--port, or :port in config/config.exs)"
   end
 
   defp connection_desc(connection) do

@@ -53,6 +53,10 @@ All notable changes to this fork are documented here. The format follows
   application env, and starts after that. The escript, whose wrapper starts the
   application before `main/1` can parse anything, stops the config-started
   children before starting its own.
+- The MCP port is checked against 1..65535 and raises an `ArgumentError` naming
+  the bad value, instead of reaching Bandit as `0`, a negative number or `nil`.
+  `0` means "any free port" to the OS, but the startup banner and the
+  `claude mcp add` hint would both print `0`, so it is rejected with the rest.
 - Eval payload handling in the SSH connection.
 - `grep_ring_logger` handles the map entries `RingLogger.get/1` returns.
 - Elixir 1.20 warnings that failed `compile --warnings-as-errors`: `split_utf8/1`

@@ -113,6 +113,44 @@ defmodule NervesMCP.CLITest do
       assert CLI.configure(["nerves.local", "--port", "14000"]).mcp_port == 14_000
       assert Application.get_env(:nerves_mcp, :port) == 14_000
     end
+
+    test "65535 is accepted" do
+      assert CLI.configure(["nerves.local", "--port", "65535"]).mcp_port == 65_535
+    end
+
+    test "0 is rejected, since the banner and the claude hint would print it" do
+      assert_raise ArgumentError, ~r/invalid MCP port 0, expected an integer in 1\.\.65535/, fn ->
+        CLI.configure(["nerves.local", "--port", "0"])
+      end
+    end
+
+    test "a negative port is rejected and named in the message" do
+      assert_raise ArgumentError, ~r/invalid MCP port -1\b/, fn ->
+        CLI.configure(["nerves.local", "--port", "-1"])
+      end
+    end
+
+    test "a port above 65535 is rejected" do
+      assert_raise ArgumentError, ~r/invalid MCP port 70000\b/, fn ->
+        CLI.configure(["nerves.local", "--port", "70000"])
+      end
+    end
+
+    test "a nil :port in the config env is rejected" do
+      Application.put_env(:nerves_mcp, :port, nil)
+
+      assert_raise ArgumentError, ~r/invalid MCP port nil\b/, fn ->
+        CLI.configure(["nerves.local"])
+      end
+    end
+
+    test "an out-of-range :port in the config env is rejected" do
+      Application.put_env(:nerves_mcp, :port, 99_999)
+
+      assert_raise ArgumentError, ~r/invalid MCP port 99999\b/, fn ->
+        CLI.configure(["nerves.local"])
+      end
+    end
   end
 
   describe "configure/1 starts nothing" do
