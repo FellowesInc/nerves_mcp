@@ -88,34 +88,33 @@ defmodule NervesMCP.History do
     |> Enum.join("\n")
   end
 
-  defp take_line(line, state) do
-    line = line |> String.replace(@prompt, "") |> String.trim_trailing()
-    trimmed = String.trim(line)
+  defp take_line(raw, state) do
+    line = raw |> String.replace(@prompt, "") |> String.trim_trailing()
+    take_line(line, String.trim(line), state)
+  end
 
+  # Between the markers: the fenced result, which the caller already got.
+  defp take_line(_line, trimmed, %{fencing: marker} = state) when is_binary(marker) do
+    if trimmed == marker <> "_END", do: %{state | fencing: nil}, else: state
+  end
+
+  # Inside the wrapper's echo, which ends at its own `end).()` or at the START
+  # marker the device prints next.
+  defp take_line(_line, trimmed, %{echoing: true} = state) do
+    case Regex.run(@marker_start, trimmed) do
+      [_line, marker] -> %{state | fencing: marker, echoing: false}
+      nil -> %{state | echoing: trimmed != @wrapper_end}
+    end
+  end
+
+  defp take_line(line, trimmed, state) do
     cond do
-      state.fencing ->
-        if trimmed == state.fencing <> "_END", do: %{state | fencing: nil}, else: state
-
-      match = Regex.run(@marker_start, trimmed) ->
-        %{state | fencing: Enum.at(match, 1), echoing: false}
-
-      state.echoing ->
-        %{state | echoing: trimmed != @wrapper_end}
-
-      trimmed == @wrapper_start ->
-        %{state | echoing: true}
-
-      Regex.match?(@marker, trimmed) ->
-        state
-
-      trimmed in ["", ":ok", "nil"] ->
-        state
-
-      trimmed == @wrapper_end ->
-        %{state | kept: drop_echo(state.kept)}
-
-      true ->
-        %{state | kept: [line | state.kept]}
+      match = Regex.run(@marker_start, trimmed) -> %{state | fencing: Enum.at(match, 1)}
+      Regex.match?(@marker, trimmed) -> state
+      trimmed in ["", ":ok", "nil"] -> state
+      trimmed == @wrapper_start -> %{state | echoing: true}
+      trimmed == @wrapper_end -> %{state | kept: drop_echo(state.kept)}
+      true -> %{state | kept: [line | state.kept]}
     end
   end
 
