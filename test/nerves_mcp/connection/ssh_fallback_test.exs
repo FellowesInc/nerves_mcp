@@ -46,6 +46,26 @@ defmodule NervesMCP.Connection.SSHFallbackTest do
              logged(log, ~r/SSH connection started to nobody@(\S+):/)
   end
 
+  # 192.0.2.1 is TEST-NET-1, so ssh sits there with nothing to say until the
+  # deadline. That is what an mDNS name that has stopped resolving looks like.
+  test "a silent attempt gives up at the connect deadline and tries the other host" do
+    Application.put_env(:nerves_mcp, :connection,
+      type: :ssh,
+      host: "192.0.2.1",
+      fallback_host: "127.0.0.1",
+      port: closed_port(),
+      user: "nobody",
+      connect_deadline_ms: 1_500
+    )
+
+    log = capture_log(fn -> run_for(5_000) end)
+
+    assert log =~ "No response from the device within the connect deadline"
+
+    assert ["192.0.2.1", "127.0.0.1" | _] =
+             logged(log, ~r/SSH connection started to nobody@(\S+):/)
+  end
+
   defp run_for(duration) do
     pid = start_supervised!(SSH)
     Process.sleep(duration)

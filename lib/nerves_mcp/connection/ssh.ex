@@ -15,6 +15,7 @@ defmodule NervesMCP.Connection.SSH do
 
   @initial_retry_delay 1_000
   @max_retry_delay 30_000
+  @connect_deadline_ms 20_000
 
   @type result() :: {:ok, String.t()} | {:error, String.t()}
 
@@ -109,6 +110,8 @@ defmodule NervesMCP.Connection.SSH do
       "ServerAliveInterval=15",
       "-o",
       "ServerAliveCountMax=2",
+      "-o",
+      "ConnectTimeout=10",
       "-p",
       "#{port}",
       "-tt",
@@ -140,6 +143,7 @@ defmodule NervesMCP.Connection.SSH do
         ])
 
       Logger.info("SSH connection started to #{user}@#{host}:#{port}")
+      Process.send_after(self(), {:connect_deadline, port_ref}, connect_deadline_ms())
       %{state | port: port_ref, data_seen?: false}
     rescue
       e ->
@@ -147,6 +151,12 @@ defmodule NervesMCP.Connection.SSH do
         schedule_reconnect(state)
         %{state | port: nil, data_seen?: false}
     end
+  end
+
+  defp connect_deadline_ms() do
+    :nerves_mcp
+    |> Application.get_env(:connection, [])
+    |> Keyword.get(:connect_deadline_ms, @connect_deadline_ms)
   end
 
   # `fallback_host` is optional. Without it every attempt goes to `host`.
@@ -309,6 +319,27 @@ defmodule NervesMCP.Connection.SSH do
         end
     end
   end
+
+  # ssh can sit for minutes on a name that won't resolve, and on macOS an mDNS
+  # name that has gone quiet does exactly that. Give up on a silent attempt and
+  # try the other host.
+  def handle_info({:connect_deadline, port}, %{port: port, data_seen?: false} = state) do
+    Logger.warning("No response from the device within the connect deadline, reconnecting")
+
+    Port.close(state.port)
+
+    new_state = %{
+      state
+      | port: nil,
+        retry_delay: next_retry_delay(state.retry_delay),
+        fallback?: next_host(state)
+    }
+
+    schedule_reconnect(new_state)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:connect_deadline, _port}, state), do: {:noreply, state}
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Logger.error("SSH process exited with status: #{status}")
