@@ -66,8 +66,10 @@ defmodule NervesMCP.Tools.IsDeviceUp do
       case try_eval(connection_type, eval_timeout) do
         {:ok, uuid} when uuid != "" ->
           # The device answered, so the probe's cached mode is stale. Without
-          # this it stays :down and the device tools keep refusing calls.
-          NervesMCP.DeviceProbe.refresh()
+          # this it stays :down and the device tools keep refusing calls. This
+          # poll read what a probe reads, so hand the answer over rather than
+          # making it go and look again.
+          NervesMCP.DeviceProbe.record_eval(uuid)
           {:ok, String.trim(uuid)}
 
         _ ->

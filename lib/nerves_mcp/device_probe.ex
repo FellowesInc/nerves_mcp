@@ -86,6 +86,21 @@ defmodule NervesMCP.DeviceProbe do
     result
   end
 
+  @doc """
+  Apply a UUID read the caller already has, with no probe of its own.
+
+  `is_device_up` and `is_device_updated_to` evaluate the same expression the
+  probe does, so their answer classifies the same way. Handing it over beats
+  `refresh/1`, which spends up to another #{@probe_timeout} ms past a deadline
+  the tool is already near, and which can cast a `:down` over a poll that just
+  succeeded. The cast lands on the same path a probe result does, so a mode
+  change still logs and still broadcasts `tools/list_changed`.
+  """
+  @spec record_eval(String.t()) :: :ok
+  def record_eval(result) when is_binary(result) do
+    GenServer.cast(__MODULE__, {:set_result, classify({:ok, result})})
+  end
+
   # GenServer callbacks
 
   @impl true

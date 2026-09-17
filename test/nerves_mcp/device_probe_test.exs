@@ -21,6 +21,17 @@ defmodule NervesMCP.DeviceProbeTest do
     assert :down == touch_until_probed(4_000)
   end
 
+  # No connection is configured, so anything that went and probed would land on
+  # :down instead.
+  test "a UUID the caller already read sets the mode with no probe of its own" do
+    start_supervised!(DeviceProbe)
+    assert DeviceProbe.mode() == :unknown
+
+    DeviceProbe.record_eval(~s|"0123abcd"\r\n|)
+
+    assert %{mode: :nerves, detail: "firmware UUID 0123abcd"} = DeviceProbe.status()
+  end
+
   defp touch_until_probed(budget) do
     deadline = System.monotonic_time(:millisecond) + budget
     touch_until_probed(deadline, DeviceProbe.mode())
