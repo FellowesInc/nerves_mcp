@@ -1,4 +1,6 @@
 defmodule Mix.Tasks.NervesMcp do
+  @shortdoc "Start NervesMCP server connected to a device"
+
   @moduledoc """
   Starts the NervesMCP server connected to a Nerves device.
 
@@ -13,8 +15,6 @@ defmodule Mix.Tasks.NervesMcp do
   """
 
   use Mix.Task
-
-  @shortdoc "Start NervesMCP server connected to a device"
 
   @impl Mix.Task
   def run(args) do

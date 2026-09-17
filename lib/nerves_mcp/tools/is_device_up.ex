@@ -10,17 +10,20 @@ defmodule NervesMCP.Tools.IsDeviceUp do
 
   @behaviour EMCP.Tool
 
+  alias NervesMCP.Connection.SSH
+  alias NervesMCP.Connection.UART
+
   @eval_timeout 5_000
   @retry_pause 2_000
 
   @impl EMCP.Tool
-  def name, do: "is_device_up"
+  def name(), do: "is_device_up"
 
   @impl EMCP.Tool
-  def description, do: "Check if the connected Nerves device is up and responsive"
+  def description(), do: "Check if the connected Nerves device is up and responsive"
 
   @impl EMCP.Tool
-  def input_schema do
+  def input_schema() do
     %{
       type: :object,
       properties: %{
@@ -77,8 +80,8 @@ defmodule NervesMCP.Tools.IsDeviceUp do
 
     try do
       case connection_type do
-        :uart -> NervesMCP.Connection.UART.eval(code, timeout)
-        :ssh -> NervesMCP.Connection.SSH.eval(code, timeout)
+        :uart -> UART.eval(code, timeout)
+        :ssh -> SSH.eval(code, timeout)
         other -> {:error, "Unknown connection type: #{inspect(other)}"}
       end
     catch
@@ -87,11 +90,9 @@ defmodule NervesMCP.Tools.IsDeviceUp do
   end
 
   defp maybe_reconnect(:ssh) do
-    try do
-      NervesMCP.Connection.SSH.reconnect()
-    catch
-      :exit, _ -> :ok
-    end
+    SSH.reconnect()
+  catch
+    :exit, _ -> :ok
   end
 
   defp maybe_reconnect(_), do: :ok

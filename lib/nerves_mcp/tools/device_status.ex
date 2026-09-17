@@ -10,15 +10,15 @@ defmodule NervesMCP.Tools.DeviceStatus do
   @behaviour EMCP.Tool
 
   @impl EMCP.Tool
-  def name, do: "device_status"
+  def name(), do: "device_status"
 
   @impl EMCP.Tool
-  def description,
+  def description(),
     do:
       "Report the detected device state (nerves/elixir/shell/down) that decides which tools are offered"
 
   @impl EMCP.Tool
-  def input_schema do
+  def input_schema() do
     %{
       type: :object,
       properties: %{

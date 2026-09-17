@@ -9,15 +9,18 @@ defmodule NervesMCP.Tools.GrepDmesg do
 
   @behaviour EMCP.Tool
 
-  @impl EMCP.Tool
-  def name, do: "grep_dmesg"
+  alias NervesMCP.Connection.SSH
+  alias NervesMCP.Connection.UART
 
   @impl EMCP.Tool
-  def description,
+  def name(), do: "grep_dmesg"
+
+  @impl EMCP.Tool
+  def description(),
     do: "Filter the connected Nerves device's `dmesg` output by a substring or regex pattern"
 
   @impl EMCP.Tool
-  def input_schema do
+  def input_schema() do
     %{
       type: :object,
       properties: %{
@@ -57,8 +60,8 @@ defmodule NervesMCP.Tools.GrepDmesg do
     result =
       try do
         case connection_type do
-          :uart -> NervesMCP.Connection.UART.eval_output(code, timeout)
-          :ssh -> NervesMCP.Connection.SSH.eval_output(code, timeout)
+          :uart -> UART.eval_output(code, timeout)
+          :ssh -> SSH.eval_output(code, timeout)
           other -> {:error, "Unknown connection type: #{inspect(other)}"}
         end
       catch

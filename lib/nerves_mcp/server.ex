@@ -39,7 +39,8 @@ defmodule NervesMCP.Server do
   after a reboot or firmware update.
   """
 
-  def server do
+  @spec server() :: struct()
+  def server() do
     NervesMCP.DeviceProbe.touch()
 
     EMCP.Server.new(

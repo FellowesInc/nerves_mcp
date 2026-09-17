@@ -49,7 +49,8 @@ defmodule NervesMCP do
   Displays all incoming data from the device and allows you to send
   commands directly. Type `#quit` to exit the console and return to IEx.
   """
-  def console do
+  @spec console() :: :ok
+  def console() do
     config = Application.get_env(:nerves_mcp, :connection, [])
     connection_type = Keyword.get(config, :type, :uart)
 
@@ -88,12 +89,14 @@ defmodule NervesMCP do
   All device output that arrives when no console is attached is stored
   in a circular buffer. Use this to view what you might have missed.
   """
-  def history do
+  @spec history() :: :ok
+  def history() do
     IO.puts(NervesMCP.History.get())
     :ok
   end
 
-  def exit do
+  @spec exit() :: no_return()
+  def exit() do
     IO.puts("Exiting...")
     System.halt(0)
   end
@@ -169,36 +172,35 @@ defmodule NervesMCP do
       idx = pos - 1
       <<_::binary-size(^idx), byte, _rest::binary>> = binary
 
-      cond do
-        # ASCII or valid end of multi-byte - everything complete
-        byte <= 127 ->
-          {:halt, 0}
-
-        # Continuation byte (10xxxxxx) - keep looking back
-        byte in 128..191 ->
-          {:cont, size - idx}
-
-        # 2-byte start (110xxxxx) - need 1 more
-        byte in 192..223 ->
-          remaining = size - idx
-          {:halt, if(remaining < 2, do: remaining, else: 0)}
-
-        # 3-byte start (1110xxxx) - need 2 more
-        byte in 224..239 ->
-          remaining = size - idx
-          {:halt, if(remaining < 3, do: remaining, else: 0)}
-
-        # 4-byte start (11110xxx) - need 3 more
-        byte in 240..247 ->
-          remaining = size - idx
-          {:halt, if(remaining < 4, do: remaining, else: 0)}
-
-        # Invalid UTF-8 byte - treat as complete to avoid infinite buffering
-        true ->
-          {:halt, 0}
-      end
+      classify_trailing_byte(byte, size - idx)
     end)
   end
+
+  # ASCII or valid end of multi-byte - everything complete
+  defp classify_trailing_byte(byte, _remaining) when byte <= 127, do: {:halt, 0}
+
+  # Continuation byte (10xxxxxx) - keep looking back
+  defp classify_trailing_byte(byte, remaining) when byte in 128..191, do: {:cont, remaining}
+
+  # 2-byte start (110xxxxx) - need 1 more
+  defp classify_trailing_byte(byte, remaining) when byte in 192..223,
+    do: {:halt, incomplete_count(remaining, 2)}
+
+  # 3-byte start (1110xxxx) - need 2 more
+  defp classify_trailing_byte(byte, remaining) when byte in 224..239,
+    do: {:halt, incomplete_count(remaining, 3)}
+
+  # 4-byte start (11110xxx) - need 3 more
+  defp classify_trailing_byte(byte, remaining) when byte in 240..247,
+    do: {:halt, incomplete_count(remaining, 4)}
+
+  # Invalid UTF-8 byte - treat as complete to avoid infinite buffering
+  defp classify_trailing_byte(_byte, _remaining), do: {:halt, 0}
+
+  defp incomplete_count(remaining, sequence_length) when remaining < sequence_length,
+    do: remaining
+
+  defp incomplete_count(_remaining, _sequence_length), do: 0
 
   defp input_loop(connection_module) do
     case IO.gets("") do
