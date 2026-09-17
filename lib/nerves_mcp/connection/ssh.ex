@@ -84,7 +84,9 @@ defmodule NervesMCP.Connection.SSH do
       port: nil,
       waiting: nil,
       console: nil,
-      retry_delay: @initial_retry_delay
+      retry_delay: @initial_retry_delay,
+      data_seen?: false,
+      fallback?: false
     }
 
     {:ok, connect(state)}
@@ -93,7 +95,7 @@ defmodule NervesMCP.Connection.SSH do
   defp connect(state) do
     config = Application.get_env(:nerves_mcp, :connection, [])
 
-    host = Keyword.fetch!(config, :host)
+    host = target_host(config, state.fallback?)
     user = Keyword.get(config, :user, "root")
     port = Keyword.get(config, :port, 22)
     pass = Keyword.get(config, :pass)
@@ -104,7 +106,9 @@ defmodule NervesMCP.Connection.SSH do
       "-o",
       "UserKnownHostsFile=/dev/null",
       "-o",
-      "ServerAliveInterval=60",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=2",
       "-p",
       "#{port}",
       "-tt",
@@ -136,12 +140,20 @@ defmodule NervesMCP.Connection.SSH do
         ])
 
       Logger.info("SSH connection started to #{user}@#{host}:#{port}")
-      %{state | port: port_ref, retry_delay: @initial_retry_delay}
+      %{state | port: port_ref, data_seen?: false}
     rescue
       e ->
         Logger.error("Failed to start SSH connection: #{inspect(e)}")
         schedule_reconnect(state)
-        %{state | port: nil}
+        %{state | port: nil, data_seen?: false}
+    end
+  end
+
+  # `fallback_host` is optional. Without it every attempt goes to `host`.
+  defp target_host(config, fallback?) do
+    case {fallback?, Keyword.get(config, :fallback_host)} do
+      {true, fallback} when is_binary(fallback) -> fallback
+      _no_fallback -> Keyword.fetch!(config, :host)
     end
   end
 
@@ -153,6 +165,11 @@ defmodule NervesMCP.Connection.SSH do
   defp next_retry_delay(current) do
     min(current * 2, @max_retry_delay)
   end
+
+  # Nothing came back from this host, so the next attempt tries the other one.
+  # A connection that did work stays where it is.
+  defp next_host(%{data_seen?: false, fallback?: fallback?}), do: not fallback?
+  defp next_host(%{fallback?: fallback?}), do: fallback?
 
   @impl true
   def handle_call({:attach_console, pid}, _from, state) do
@@ -269,6 +286,7 @@ defmodule NervesMCP.Connection.SSH do
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     NervesMCP.History.push(data)
+    state = note_data(state)
 
     case state.waiting do
       nil ->
@@ -305,7 +323,8 @@ defmodule NervesMCP.Connection.SSH do
     new_state = %{
       state
       | port: nil,
-        retry_delay: next_retry_delay(state.retry_delay)
+        retry_delay: next_retry_delay(state.retry_delay),
+        fallback?: next_host(state)
     }
 
     schedule_reconnect(new_state)
@@ -406,4 +425,10 @@ defmodule NervesMCP.Connection.SSH do
       0 -> :ok
     end
   end
+
+  # The backoff resets on device output, not on `Port.open`. Opening succeeds
+  # even when ssh then exits 255 because the host does not resolve, and retrying
+  # that every two seconds forever is no use to anyone.
+  defp note_data(%{data_seen?: true} = state), do: state
+  defp note_data(state), do: %{state | data_seen?: true, retry_delay: @initial_retry_delay}
 end
