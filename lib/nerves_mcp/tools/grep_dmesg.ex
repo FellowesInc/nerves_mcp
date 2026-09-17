@@ -9,8 +9,7 @@ defmodule NervesMCP.Tools.GrepDmesg do
 
   @behaviour EMCP.Tool
 
-  alias NervesMCP.Connection.SSH
-  alias NervesMCP.Connection.UART
+  alias NervesMCP.Tools.Device
 
   @impl EMCP.Tool
   def name(), do: "grep_dmesg"
@@ -54,25 +53,7 @@ defmodule NervesMCP.Tools.GrepDmesg do
 
     code = build_code(pattern, regex?, tail)
 
-    config = Application.get_env(:nerves_mcp, :connection, [])
-    connection_type = Keyword.get(config, :type, :uart)
-
-    result =
-      try do
-        case connection_type do
-          :uart -> UART.eval_output(code, timeout)
-          :ssh -> SSH.eval_output(code, timeout)
-          other -> {:error, "Unknown connection type: #{inspect(other)}"}
-        end
-      catch
-        :exit, {:noproc, _} ->
-          {:error, "Device connection not available (process not running)"}
-
-        :exit, reason ->
-          {:error, "Device connection error: #{inspect(reason)}"}
-      end
-
-    case result do
+    case Device.eval_output(code, timeout) do
       {:ok, output} -> EMCP.Tool.response([%{"type" => "text", "text" => output}])
       {:error, reason} -> EMCP.Tool.error(reason)
     end
