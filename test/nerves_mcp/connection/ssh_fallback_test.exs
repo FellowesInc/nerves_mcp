@@ -67,6 +67,52 @@ defmodule NervesMCP.Connection.SSHFallbackTest do
              logged(log, ~r/SSH connection started to nobody@(\S+):/)
   end
 
+  # The polling tools reconnect on a failed eval long before the deadline, so
+  # this is the path that decides whether fallback_host is ever tried.
+  test "an explicit reconnect moves a silent attempt to the other host" do
+    Application.put_env(:nerves_mcp, :connection,
+      type: :ssh,
+      host: "127.0.0.1",
+      fallback_host: "localhost",
+      port: silent_port(),
+      user: "nobody",
+      connect_deadline_ms: 60_000
+    )
+
+    log =
+      capture_log(fn ->
+        start_supervised!(SSH)
+        assert :ok = SSH.reconnect()
+        stop_supervised!(SSH)
+      end)
+
+    assert ["127.0.0.1", "localhost" | _] =
+             logged(log, ~r/SSH connection started to nobody@(\S+):/)
+  end
+
+  # Nothing is listening, so the first attempt exits 255 and has already moved to
+  # fallback_host. An explicit reconnect in that window must not move it back.
+  test "an explicit reconnect keeps the host an exited attempt already chose" do
+    Application.put_env(:nerves_mcp, :connection,
+      type: :ssh,
+      host: "127.0.0.1",
+      fallback_host: "localhost",
+      port: closed_port(),
+      user: "nobody"
+    )
+
+    log =
+      capture_log(fn ->
+        start_supervised!(SSH)
+        Process.sleep(1_000)
+        assert :ok = SSH.reconnect()
+        stop_supervised!(SSH)
+      end)
+
+    assert ["127.0.0.1", "localhost" | _] =
+             logged(log, ~r/SSH connection started to nobody@(\S+):/)
+  end
+
   defp run_for(duration) do
     pid = start_supervised!(SSH)
     Process.sleep(duration)

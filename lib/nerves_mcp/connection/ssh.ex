@@ -181,6 +181,18 @@ defmodule NervesMCP.Connection.SSH do
   defp next_host(%{data_seen?: false, fallback?: fallback?}), do: not fallback?
   defp next_host(%{fallback?: fallback?}), do: fallback?
 
+  # An explicit reconnect kills a live attempt, so it picks the next host the
+  # same way the connect deadline does. The polling tools call `reconnect/0`
+  # after a 5 s eval failure, well inside the 20 s deadline, so without this the
+  # same silent host is restarted forever and `fallback_host` is never tried. An
+  # attempt that already exited chose its host on the way out.
+  defp close_attempt(%{port: nil} = state), do: state
+
+  defp close_attempt(state) do
+    Port.close(state.port)
+    %{state | port: nil, fallback?: next_host(state)}
+  end
+
   @impl true
   def handle_call({:attach_console, pid}, _from, state) do
     ref = Process.monitor(pid)
@@ -197,13 +209,9 @@ defmodule NervesMCP.Connection.SSH do
   end
 
   def handle_call(:reconnect, _from, state) do
-    state = reply_waiting(state, {:error, "Reconnecting"})
+    state = state |> reply_waiting({:error, "Reconnecting"}) |> close_attempt()
 
-    if state.port do
-      Port.close(state.port)
-    end
-
-    new_state = connect(%{state | port: nil})
+    new_state = connect(state)
     {:reply, if(new_state.port, do: :ok, else: {:error, "reconnect failed"}), new_state}
   end
 
