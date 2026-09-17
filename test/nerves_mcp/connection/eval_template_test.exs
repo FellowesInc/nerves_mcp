@@ -85,6 +85,16 @@ defmodule NervesMCP.Connection.EvalTemplateTest do
       assert result == String.duplicate("noise\r\n", 100)
     end
 
+    # The port hands over whatever bytes have arrived, so a two-byte character
+    # can land half in one chunk and half in the next. Neither half on its own is
+    # valid UTF-8.
+    test "a character split across two chunks is tolerated" do
+      <<first::binary-size(1), second::binary-size(1)>> = "é"
+
+      assert {:done, "é\r\n"} =
+               feed(matcher(), ["ABCD_START\r\n", first, second, "\r\nABCD_END\r\n"])
+    end
+
     test "the UART anchor matches the newline before the marker" do
       uart = Matcher.new("ABCD", :elixir, anchor: :leading)
 
