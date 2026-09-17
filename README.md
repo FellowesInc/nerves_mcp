@@ -42,16 +42,43 @@ mix escript.build
 
 ### Options
 
-| Flag           | Description                        | Default   |
-|----------------|------------------------------------|-----------|
-| `--port`       | MCP server HTTP port               | `13000`   |
-| `--speed`      | Serial baud rate                   | `115200`  |
-| `--user`       | SSH username                       | `root`    |
-| `--ssh-port`   | SSH port                           | `22`      |
-| `--serial`     | Force serial mode (pass device)    |           |
-| `--ssh`        | Force SSH mode (pass host)         |           |
+| Flag              | Description                                               | Default  |
+|-------------------|-----------------------------------------------------------|----------|
+| `--port`          | MCP server HTTP port                                      | `13000`  |
+| `--speed`         | Serial baud rate                                          | `115200` |
+| `--user`          | SSH username                                              | `root`   |
+| `--ssh-port`      | SSH port                                                  | `22`     |
+| `--pass`          | SSH password (needs `sshpass`; not for high-security use) |          |
+| `--fallback-host` | Second SSH host to try when the first won't resolve       |          |
+| `--serial`        | Force serial mode (pass device)                           |          |
+| `--ssh`           | Force SSH mode (pass host)                                |          |
+| `--no-repl`       | Skip the stdin console and block instead                  |          |
 
 Short aliases: `-p` (port), `-s` (speed), `-u` (user).
+
+### `--fallback-host`
+
+An mDNS name like `nerves.local` stops resolving when the device reboots or the
+responder goes quiet, while the IP address still works (and the other way
+round). `--fallback-host` gives the SSH connection a second host to alternate
+to when ssh can't resolve the first:
+
+```bash
+mix nerves_mcp nerves.local --fallback-host 192.168.1.252
+```
+
+### `--no-repl`
+
+By default the foreground is the stdin console, which exits on EOF and takes the
+server with it. `--no-repl` blocks instead, so the server survives a closed
+stdin and can run from a background shell or under a process supervisor:
+
+```bash
+nohup ./nerves_mcp nerves.local --no-repl > nerves_mcp.log 2>&1 &
+```
+
+Ctrl-C still stops it. Under the escript that exits straight away; under `mix`
+it opens the Erlang break menu, where `a` aborts.
 
 ### Configuration file
 
@@ -70,7 +97,8 @@ config :nerves_mcp, :connection,
   type: :ssh,
   host: "nerves.local",
   user: "root",
-  port: 22
+  port: 22,
+  fallback_host: "192.168.1.252"
 ```
 
 With config in place, you can start without any arguments:
@@ -105,6 +133,10 @@ http://localhost:13000/mcp
 
 Or whatever port you specified with `--port`.
 
+The HTTP server binds to loopback only. The `/mcp` endpoint has no
+authentication and `device_eval` runs code on the connected device, so it is
+not something to expose on a network.
+
 ## MCP Tools
 
 ### device_eval
@@ -115,6 +147,10 @@ Evaluates Elixir code on the device and returns the expression's return value.
 
 Evaluates Elixir code and captures IO output (what the code prints via `IO.puts`, `IO.write`, etc.) in addition to the return value.
 
+### device_output
+
+Returns session output buffered since a cursor you pass in, and the new cursor. For reading output from something spawned on the device that keeps printing after `device_eval` returned.
+
 ### grep_ring_logger
 
 Filters the device's `RingLogger` buffer by a substring or regex pattern. Optional `tail` returns only the last N matches.
@@ -122,6 +158,25 @@ Filters the device's `RingLogger` buffer by a substring or regex pattern. Option
 ### grep_dmesg
 
 Filters the device's `dmesg` (kernel ring buffer) by a substring or regex pattern. Optional `tail` returns only the last N matches.
+
+### is_device_up
+
+Polls the device for its firmware UUID until it answers or the timeout runs out. Use it to wait out a reboot. `timeout` defaults to 60000 ms.
+
+### is_device_updated_to
+
+Same poll as `is_device_up`, but against an `expected_uuid`. Errors if the device comes back on a different UUID, which is how a reverted firmware update shows up.
+
+### device_status
+
+Reports what the probe currently detects on the other end of the connection (`nerves`, `elixir`, `shell`, `down` or `unknown`), and which tools that state offers. Pass `refresh: true` to probe now instead of reading the cached result.
+
+### When the device is down
+
+The tool list doesn't shrink. Tools that need a live device stay listed and
+return an error pointing the caller at `is_device_up`, so a client that fetched
+the list before a reboot doesn't lose the tools it needs to wait for the device
+to come back.
 
 ## Interactive Console
 
