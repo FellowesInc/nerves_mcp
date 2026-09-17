@@ -49,8 +49,9 @@ defmodule NervesMCP.MixProject do
         "format --check-formatted",
         "credo",
         "deps.unlock --check-unused",
-        "spellweaver.check",
-        "dialyzer"
+        "dialyzer",
+        # spellweaver.check calls System.halt, so it has to run last
+        "spellweaver.check"
       ]
     ]
   end
