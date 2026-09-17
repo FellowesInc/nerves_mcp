@@ -115,6 +115,16 @@ defmodule NervesMCP.CLITest do
     end
   end
 
+  describe "configure/1 starts nothing" do
+    # `mix nerves_mcp` relies on this: configure first, then app.start, so the
+    # application reads the CLI values instead of starting on the config port.
+    test "no children come up" do
+      CLI.configure(["nerves.local", "--port", "13999"])
+
+      assert Supervisor.which_children(NervesMCP.Supervisor) == []
+    end
+  end
+
   describe "configure/1 --no-repl" do
     test "the repl runs by default" do
       assert CLI.configure(["nerves.local"]).repl? == true

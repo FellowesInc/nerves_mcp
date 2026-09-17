@@ -23,10 +23,17 @@ defmodule Mix.Tasks.NervesMcp do
 
   @impl Mix.Task
   def run(args) do
+    # `app.config` loads config/config.exs without starting anything, so the CLI
+    # args land in the application env before `NervesMCP.Application` reads them.
+    # Starting first would bring up Bandit and the connection on the config port
+    # and host, and the CLI overrides would be ignored.
+    Mix.Task.run("app.config")
+
+    config = NervesMCP.CLI.configure(args)
+
     Mix.Task.run("app.start")
 
-    args
-    |> NervesMCP.CLI.run()
-    |> NervesMCP.CLI.serve()
+    NervesMCP.CLI.announce(config)
+    NervesMCP.CLI.serve(config)
   end
 end

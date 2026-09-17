@@ -45,6 +45,14 @@ All notable changes to this fork are documented here. The format follows
 
 ### Fixed
 
+- `mix nerves_mcp` no longer ignores its own arguments when
+  `config/config.exs` names a `:connection`. `app.start` ran first and brought
+  up Bandit and the connection on the config port and host, then the CLI started
+  a second set. Bandit's child id is a fresh reference every time, so both
+  listeners survived. The task now runs `app.config`, parses the args into the
+  application env, and starts after that. The escript, whose wrapper starts the
+  application before `main/1` can parse anything, stops the config-started
+  children before starting its own.
 - Eval payload handling in the SSH connection.
 - `grep_ring_logger` handles the map entries `RingLogger.get/1` returns.
 - Elixir 1.20 warnings that failed `compile --warnings-as-errors`: `split_utf8/1`

@@ -81,20 +81,32 @@ defmodule NervesMCP.CLI do
 
   @doc """
   Parse args into the application env, then start the children.
+
+  The escript path. Its wrapper starts the application first, so any children
+  already up from `config/config.exs` are replaced. `Mix.Tasks.NervesMcp`
+  configures before `app.start` instead and doesn't call this.
   """
   @spec run([String.t()]) :: config()
   def run(args) do
     config = configure(args)
 
     start_children(config.connection, config.mcp_port)
+    announce(config)
 
+    config
+  end
+
+  @doc """
+  Print the port and connection the server came up on, and how to point Claude
+  Code at it.
+  """
+  @spec announce(config()) :: :ok
+  def announce(config) do
     IO.puts(
       "NervesMCP started on port #{config.mcp_port} via #{connection_desc(config.connection)}"
     )
 
     maybe_print_claude_hint(config.mcp_port)
-
-    config
   end
 
   @doc """
@@ -125,6 +137,7 @@ defmodule NervesMCP.CLI do
 
     existing_config = Application.get_env(:nerves_mcp, :connection, [])
     connection = resolve_connection(opts, positional, existing_config)
+
     mcp_port = Keyword.get(opts, :port, Application.get_env(:nerves_mcp, :port, 13000))
 
     Application.put_env(:nerves_mcp, :connection, connection)
@@ -161,6 +174,8 @@ defmodule NervesMCP.CLI do
       Claude Code detected. Add this MCP server with:
         claude mcp add --transport http nerves http://localhost:#{mcp_port}/mcp
       """)
+    else
+      :ok
     end
   end
 
@@ -265,6 +280,8 @@ defmodule NervesMCP.CLI do
         :ssh -> NervesMCP.Connection.SSH
       end
 
+    stop_children()
+
     children = [
       NervesMCP.History,
       {Bandit, plug: NervesMCP.Router, port: mcp_port, ip: :loopback},
@@ -274,6 +291,17 @@ defmodule NervesMCP.CLI do
 
     for child <- children do
       Supervisor.start_child(NervesMCP.Supervisor, child)
+    end
+  end
+
+  # `NervesMCP.Application` already started this set from config/config.exs when
+  # the config names a `:type`, on the config port and against the config host.
+  # Bandit's child id is a fresh reference every time, so a second start_child
+  # leaves two listeners rather than colliding.
+  defp stop_children() do
+    for {id, _pid, _type, _modules} <- Supervisor.which_children(NervesMCP.Supervisor) do
+      Supervisor.terminate_child(NervesMCP.Supervisor, id)
+      Supervisor.delete_child(NervesMCP.Supervisor, id)
     end
   end
 end
