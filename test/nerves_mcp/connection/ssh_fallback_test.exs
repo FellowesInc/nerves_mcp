@@ -46,14 +46,15 @@ defmodule NervesMCP.Connection.SSHFallbackTest do
              logged(log, ~r/SSH connection started to nobody@(\S+):/)
   end
 
-  # 192.0.2.1 is TEST-NET-1, so ssh sits there with nothing to say until the
-  # deadline. That is what an mDNS name that has stopped resolving looks like.
+  # The listener takes the TCP connection and then says nothing, so ssh waits on
+  # a banner that never comes. That is what an mDNS name that has stopped
+  # resolving looks like from here.
   test "a silent attempt gives up at the connect deadline and tries the other host" do
     Application.put_env(:nerves_mcp, :connection,
       type: :ssh,
-      host: "192.0.2.1",
-      fallback_host: "127.0.0.1",
-      port: closed_port(),
+      host: "127.0.0.1",
+      fallback_host: "localhost",
+      port: silent_port(),
       user: "nobody",
       connect_deadline_ms: 1_500
     )
@@ -62,7 +63,7 @@ defmodule NervesMCP.Connection.SSHFallbackTest do
 
     assert log =~ "No response from the device within the connect deadline"
 
-    assert ["192.0.2.1", "127.0.0.1" | _] =
+    assert ["127.0.0.1", "localhost" | _] =
              logged(log, ~r/SSH connection started to nobody@(\S+):/)
   end
 
@@ -83,5 +84,35 @@ defmodule NervesMCP.Connection.SSHFallbackTest do
     :ok = :gen_tcp.close(socket)
 
     port
+  end
+
+  # A loopback listener that accepts and then holds its peers without writing a
+  # byte. `:gen_tcp.accept/1` only answers the socket's owner, so the listener
+  # has to run in its own process.
+  defp silent_port() do
+    test = self()
+
+    pid =
+      spawn(fn ->
+        {:ok, socket} = :gen_tcp.listen(0, [:binary, ip: :loopback, active: false])
+        {:ok, port} = :inet.port(socket)
+        send(test, {:listening, port})
+        hold(socket, [])
+      end)
+
+    on_exit(fn -> Process.exit(pid, :kill) end)
+
+    receive do
+      {:listening, port} -> port
+    after
+      5_000 -> flunk("the silent listener never started")
+    end
+  end
+
+  defp hold(socket, peers) do
+    case :gen_tcp.accept(socket) do
+      {:ok, peer} -> hold(socket, [peer | peers])
+      {:error, _closed} -> :ok
+    end
   end
 end
