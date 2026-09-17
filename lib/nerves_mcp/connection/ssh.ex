@@ -131,7 +131,8 @@ defmodule NervesMCP.Connection.SSH do
         Port.open({:spawn_executable, executable}, [
           :binary,
           :exit_status,
-          args: args
+          args: args,
+          env: [{~c"TERM", ~c"dumb"}]
         ])
 
       Logger.info("SSH connection started to #{user}@#{host}:#{port}")
