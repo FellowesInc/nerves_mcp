@@ -7,6 +7,7 @@ defmodule NervesMCP.MixProject do
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       name: "Nerves mcp",
       description: "TODO: write a proper description",
@@ -18,13 +19,21 @@ defmodule NervesMCP.MixProject do
     ]
   end
 
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_env), do: ["lib"]
+
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [:logger | env_applications(Mix.env())],
       mod: {NervesMCP.Application, []}
     ]
   end
+
+  # The test daemon needs the OTP ssh and iex apps on the code path, which Elixir prunes
+  # for apps that aren't listed.
+  defp env_applications(:test), do: [:ssh, :iex]
+  defp env_applications(_env), do: []
 
   def docs do
     [
