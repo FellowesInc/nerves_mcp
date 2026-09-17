@@ -65,10 +65,12 @@ defmodule NervesMCP.Tools.IsDeviceUp do
 
       case try_eval(connection_type, eval_timeout) do
         {:ok, uuid} when uuid != "" ->
+          # The device answered, so the probe's cached mode is stale. Without
+          # this it stays :down and the device tools keep refusing calls.
+          NervesMCP.DeviceProbe.refresh()
           {:ok, String.trim(uuid)}
 
         _ ->
-          maybe_reconnect(connection_type)
           Process.sleep(min(@retry_pause, max(0, deadline - System.monotonic_time(:millisecond))))
           poll_device(connection_type, deadline)
       end
@@ -88,12 +90,4 @@ defmodule NervesMCP.Tools.IsDeviceUp do
       :exit, _ -> {:error, "connection unavailable"}
     end
   end
-
-  defp maybe_reconnect(:ssh) do
-    SSH.reconnect()
-  catch
-    :exit, _ -> :ok
-  end
-
-  defp maybe_reconnect(_), do: :ok
 end
