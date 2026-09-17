@@ -148,6 +148,13 @@ defmodule NervesMCP.Connection.UART do
     {:reply, {:error, "Device not connected (reconnecting...)"}, state}
   end
 
+  # One expression at a time. A second one would overwrite the first caller's
+  # marker and strand it until its timeout.
+  def handle_call({op, _payload, _timeout}, _from, %{waiting: waiting} = state)
+      when op in [:eval, :eval_output, :shell_eval, :shell_eval_output] and not is_nil(waiting) do
+    {:reply, {:error, "busy"}, state}
+  end
+
   def handle_call({:eval, code, timeout}, from, state) do
     marker = EvalTemplate.marker()
 
@@ -286,9 +293,20 @@ defmodule NervesMCP.Connection.UART do
     {:noreply, %{state | waiting: nil}}
   end
 
-  def handle_info({:timeout, from}, state) do
+  def handle_info({:timeout, from}, %{waiting: %{from: from}} = state) do
+    # The expression that timed out may be half typed on the device, where it
+    # would swallow every later eval.
+    if state.connected do
+      Circuits.UART.write(state.uart, "#iex:break\n")
+    end
+
     GenServer.reply(from, {:error, "Timeout waiting for device response"})
     {:noreply, %{state | waiting: nil}}
+  end
+
+  # A timer for a call that already answered. Its caller is long gone.
+  def handle_info({tag, _from}, state) when tag in [:timeout, :probe_timeout] do
+    {:noreply, state}
   end
 
   def handle_info({:DOWN, ref, :process, pid, _reason}, %{console: {pid, ref}} = state) do
@@ -323,7 +341,8 @@ defmodule NervesMCP.Connection.UART do
     waiting = %{
       from: from,
       matcher: Keyword.fetch!(opts, :matcher),
-      timer: timer
+      timer: timer,
+      message: message
     }
 
     {:noreply, %{state | waiting: waiting}}
@@ -337,7 +356,16 @@ defmodule NervesMCP.Connection.UART do
     %{state | waiting: nil}
   end
 
+  # Cancelling is not enough. The timer may already have fired, and the message
+  # would then arrive for a call that is finished.
   defp cancel_timer(waiting) do
-    Process.cancel_timer(waiting.timer)
+    Process.cancel_timer(waiting.timer, info: false)
+    message = waiting.message
+
+    receive do
+      ^message -> :ok
+    after
+      0 -> :ok
+    end
   end
 end
