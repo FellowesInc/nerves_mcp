@@ -7,18 +7,21 @@ defmodule NervesMCP.History do
 
   @default_size 10_000
 
+  @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
     size = Keyword.get(opts, :size, @default_size)
     Agent.start_link(fn -> CircularBuffer.new(size) end, name: __MODULE__)
   end
 
+  @spec push(binary()) :: :ok
   def push(data) when is_binary(data) do
     Agent.update(__MODULE__, fn buffer ->
       CircularBuffer.insert(buffer, {System.monotonic_time(), data})
     end)
   end
 
-  def get do
+  @spec get() :: String.t()
+  def get() do
     Agent.get(__MODULE__, fn buffer ->
       buffer
       |> CircularBuffer.to_list()
@@ -26,7 +29,8 @@ defmodule NervesMCP.History do
     end)
   end
 
-  def clear do
+  @spec clear() :: :ok
+  def clear() do
     Agent.update(__MODULE__, fn buffer ->
       CircularBuffer.new(buffer.max_size)
     end)

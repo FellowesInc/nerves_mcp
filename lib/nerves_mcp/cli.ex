@@ -21,12 +21,14 @@ defmodule NervesMCP.CLI do
 
   @serial_patterns ["/dev/tty", "/dev/cu.", "/dev/serial"]
 
+  @spec main([String.t()]) :: :ok
   def main(args) do
     run(args)
     repl()
   end
 
-  def repl do
+  @spec repl() :: :ok
+  def repl() do
     case IO.gets("> ") do
       :eof ->
         :ok
@@ -50,6 +52,7 @@ defmodule NervesMCP.CLI do
   defp handle_command(""), do: :ok
   defp handle_command(other), do: IO.puts("Unknown command: #{other}. Type 'help' for commands.")
 
+  @spec run([String.t()]) :: :ok | nil
   def run(args) do
     {opts, positional, _} =
       OptionParser.parse(args,

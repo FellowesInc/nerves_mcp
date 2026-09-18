@@ -13,24 +13,31 @@ defmodule NervesMCP.Connection.SSH do
   @initial_retry_delay 1_000
   @max_retry_delay 30_000
 
+  @type result() :: {:ok, String.t()} | {:error, String.t()}
+
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
+  @spec eval(String.t(), non_neg_integer()) :: result()
   def eval(code, timeout \\ 15000) do
     GenServer.call(__MODULE__, {:eval, code, timeout}, timeout + 1000)
   end
 
+  @spec eval_output(String.t(), non_neg_integer()) :: result()
   def eval_output(code, timeout \\ 15000) do
     GenServer.call(__MODULE__, {:eval_output, code, timeout}, timeout + 1000)
   end
 
   @doc "Run a raw shell command (no Elixir wrapping). Used in degraded shell mode."
+  @spec shell_eval(String.t(), non_neg_integer()) :: result()
   def shell_eval(command, timeout \\ 15000) do
     GenServer.call(__MODULE__, {:shell_eval, command, timeout}, timeout + 1000)
   end
 
   @doc "Run a raw shell command and capture stdout/stderr plus exit code."
+  @spec shell_eval_output(String.t(), non_neg_integer()) :: result()
   def shell_eval_output(command, timeout \\ 15000) do
     GenServer.call(__MODULE__, {:shell_eval_output, command, timeout}, timeout + 1000)
   end
@@ -43,23 +50,28 @@ defmodule NervesMCP.Connection.SSH do
     * `:down`         — not connected / nothing came back
     * `:busy`         — an evaluation is already in flight
   """
+  @spec probe(non_neg_integer()) :: {:ok, String.t()} | :noise | :down | :busy
   def probe(timeout \\ 4_000) do
     GenServer.call(__MODULE__, {:probe, timeout}, timeout + 1000)
   end
 
+  @spec attach_console(pid()) :: :ok
   def attach_console(pid \\ self()) do
     GenServer.call(__MODULE__, {:attach_console, pid})
   end
 
-  def detach_console do
+  @spec detach_console() :: :ok
+  def detach_console() do
     GenServer.call(__MODULE__, :detach_console)
   end
 
+  @spec send_raw(iodata()) :: :ok
   def send_raw(data) do
     GenServer.cast(__MODULE__, {:send_raw, data})
   end
 
-  def reconnect do
+  @spec reconnect() :: :ok | {:error, String.t()}
+  def reconnect() do
     GenServer.call(__MODULE__, :reconnect, 10_000)
   end
 
@@ -454,7 +466,7 @@ defmodule NervesMCP.Connection.SSH do
     :ok
   end
 
-  defp generate_marker do
+  defp generate_marker() do
     :crypto.strong_rand_bytes(8) |> Base.encode16()
   end
 

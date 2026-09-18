@@ -24,27 +24,43 @@ defmodule NervesMCP.DeviceProbe do
 
   use GenServer
 
+  alias EMCP.Transport.StreamableHTTP
+  alias NervesMCP.Connection.SSH
+  alias NervesMCP.Connection.UART
+
   require Logger
 
   @idle_threshold 10_000
   @tick 2_000
   @probe_timeout 4_000
 
+  @type mode() :: :nerves | :elixir | :shell | :down | :unknown
+
+  @type status() :: %{
+          mode: mode(),
+          detail: String.t(),
+          idle_ms: integer() | nil,
+          last_probe_ms_ago: integer() | nil
+        }
+
   # Public API
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
   @doc "Current detected mode. Fast, non-blocking; falls back to `:unknown`."
-  def mode do
+  @spec mode() :: mode()
+  def mode() do
     GenServer.call(__MODULE__, :mode, 1_000)
   catch
     :exit, _ -> :unknown
   end
 
   @doc "Full status map for the device_status tool."
-  def status do
+  @spec status() :: status()
+  def status() do
     GenServer.call(__MODULE__, :status, 1_000)
   catch
     :exit, _ ->
@@ -52,11 +68,13 @@ defmodule NervesMCP.DeviceProbe do
   end
 
   @doc "Record MCP activity so the idle timer does not probe during active use."
-  def touch do
+  @spec touch() :: :ok
+  def touch() do
     GenServer.cast(__MODULE__, :touch)
   end
 
   @doc "Run a probe synchronously in the caller and update the cached mode."
+  @spec refresh(non_neg_integer()) :: {mode() | :busy, String.t()}
   def refresh(timeout \\ @probe_timeout) do
     result = run_probe(timeout)
     GenServer.cast(__MODULE__, {:set_result, result})
@@ -158,14 +176,15 @@ defmodule NervesMCP.DeviceProbe do
   end
 
   @doc false
+  @spec run_probe(non_neg_integer()) :: {mode() | :busy, String.t()}
   def run_probe(timeout) do
     config = Application.get_env(:nerves_mcp, :connection, [])
 
     raw =
       try do
         case Keyword.get(config, :type) do
-          :uart -> NervesMCP.Connection.UART.probe(timeout)
-          :ssh -> NervesMCP.Connection.SSH.probe(timeout)
+          :uart -> UART.probe(timeout)
+          :ssh -> SSH.probe(timeout)
           _ -> :down
         end
       catch
@@ -201,7 +220,6 @@ defmodule NervesMCP.DeviceProbe do
   defp classify(:down), do: {:down, "no response from device"}
   defp classify(:busy), do: {:busy, "device busy (evaluation in flight)"}
   defp classify({:error, reason}), do: {:unknown, "probe error: #{inspect(reason)}"}
-  defp classify(other), do: {:unknown, "unexpected probe result: #{inspect(other)}"}
 
   # Don't overwrite a known mode just because the device was momentarily busy.
   defp apply_result(state, {:busy, _detail}), do: state
@@ -215,8 +233,8 @@ defmodule NervesMCP.DeviceProbe do
     %{state | mode: mode, detail: detail}
   end
 
-  defp broadcast_tools_changed do
-    EMCP.Transport.StreamableHTTP.broadcast(EMCP.SessionStore.ETS, %{
+  defp broadcast_tools_changed() do
+    StreamableHTTP.broadcast(EMCP.SessionStore.ETS, %{
       "jsonrpc" => "2.0",
       "method" => "notifications/tools/list_changed"
     })
@@ -226,7 +244,7 @@ defmodule NervesMCP.DeviceProbe do
     _, _ -> :ok
   end
 
-  defp schedule_tick, do: Process.send_after(self(), :tick, @tick)
+  defp schedule_tick(), do: Process.send_after(self(), :tick, @tick)
 
-  defp mono, do: System.monotonic_time(:millisecond)
+  defp mono(), do: System.monotonic_time(:millisecond)
 end

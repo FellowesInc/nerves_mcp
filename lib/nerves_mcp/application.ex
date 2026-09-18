@@ -3,9 +3,11 @@ defmodule NervesMCP.Application do
 
   use Application
 
+  alias EMCP.SessionStore.ETS
+
   @impl true
   def start(_type, _args) do
-    EMCP.SessionStore.ETS.init()
+    ETS.init()
 
     config = Application.get_env(:nerves_mcp, :connection, [])
 

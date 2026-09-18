@@ -9,16 +9,19 @@ defmodule NervesMCP.Tools.DeviceEvalOutput do
 
   @behaviour EMCP.Tool
 
-  @impl EMCP.Tool
-  def name, do: "device_eval_output"
+  alias NervesMCP.Connection.SSH
+  alias NervesMCP.Connection.UART
 
   @impl EMCP.Tool
-  def description,
+  def name(), do: "device_eval_output"
+
+  @impl EMCP.Tool
+  def description(),
     do:
       "Evaluate Elixir code on the connected Nerves device and capture IO output along with the result"
 
   @impl EMCP.Tool
-  def input_schema do
+  def input_schema() do
     %{
       type: :object,
       properties: %{
@@ -41,10 +44,10 @@ defmodule NervesMCP.Tools.DeviceEvalOutput do
       try do
         case connection_type do
           :uart ->
-            NervesMCP.Connection.UART.eval_output(code, timeout)
+            UART.eval_output(code, timeout)
 
           :ssh ->
-            NervesMCP.Connection.SSH.eval_output(code, timeout)
+            SSH.eval_output(code, timeout)
 
           other ->
             {:error, "Unknown connection type: #{inspect(other)}"}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
+  "version": "0.2",
+  "language": "en",
+  "useGitignore": true,
+  "gitignoreRoot": ".",
+  "dictionaries": [
+    "elixir",
+    "npm",
+    "softwareTerms"
+  ],
+  "ignorePaths": [
+    "_build",
+    "cover",
+    "deps",
+    "doc",
+    "erl_crash.dump",
+    "mix.lock",
+    "priv"
+  ],
+  "words": [
+    "demonitor",
+    "emcp",
+    "escript",
+    "keygen",
+    "exnvr",
+    "noproc",
+    "spellweaver",
+    "sshpass",
+    "streamable",
+    "uart",
+    "whereis"
+  ]
+}

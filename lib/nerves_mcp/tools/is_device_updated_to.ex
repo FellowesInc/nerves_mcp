@@ -11,18 +11,21 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedTo do
 
   @behaviour EMCP.Tool
 
+  alias NervesMCP.Connection.SSH
+  alias NervesMCP.Connection.UART
+
   @eval_timeout 5_000
   @retry_pause 2_000
 
   @impl EMCP.Tool
-  def name, do: "is_device_updated_to"
+  def name(), do: "is_device_updated_to"
 
   @impl EMCP.Tool
-  def description,
+  def description(),
     do: "Check if the connected Nerves device has been updated to a specific firmware version"
 
   @impl EMCP.Tool
-  def input_schema do
+  def input_schema() do
     %{
       type: :object,
       properties: %{
@@ -72,14 +75,7 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedTo do
 
       case try_eval(connection_type, eval_timeout) do
         {:ok, raw_uuid} when raw_uuid != "" ->
-          actual_uuid = raw_uuid |> String.trim() |> String.trim(~s|"|)
-
-          if actual_uuid == expected_uuid do
-            :ok
-          else
-            {:error,
-             "Device came up with firmware UUID #{actual_uuid}, expected #{expected_uuid} — firmware may have reverted"}
-          end
+          compare_uuid(raw_uuid, expected_uuid)
 
         _ ->
           maybe_reconnect(connection_type)
@@ -89,13 +85,24 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedTo do
     end
   end
 
+  defp compare_uuid(raw_uuid, expected_uuid) do
+    actual_uuid = raw_uuid |> String.trim() |> String.trim(~s|"|)
+
+    if actual_uuid == expected_uuid do
+      :ok
+    else
+      {:error,
+       "Device came up with firmware UUID #{actual_uuid}, expected #{expected_uuid} — firmware may have reverted"}
+    end
+  end
+
   defp try_eval(connection_type, timeout) do
     code = ~s|Nerves.Runtime.KV.get_active("nerves_fw_uuid")|
 
     try do
       case connection_type do
-        :uart -> NervesMCP.Connection.UART.eval(code, timeout)
-        :ssh -> NervesMCP.Connection.SSH.eval(code, timeout)
+        :uart -> UART.eval(code, timeout)
+        :ssh -> SSH.eval(code, timeout)
         other -> {:error, "Unknown connection type: #{inspect(other)}"}
       end
     catch
@@ -104,11 +111,9 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedTo do
   end
 
   defp maybe_reconnect(:ssh) do
-    try do
-      NervesMCP.Connection.SSH.reconnect()
-    catch
-      :exit, _ -> :ok
-    end
+    SSH.reconnect()
+  catch
+    :exit, _ -> :ok
   end
 
   defp maybe_reconnect(_), do: :ok
