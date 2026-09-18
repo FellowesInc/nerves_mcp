@@ -9,6 +9,7 @@ defmodule NervesMCP.Tools.SetDeviceAddress do
 
   @behaviour EMCP.Tool
 
+  alias NervesMCP.DeviceProbe
   alias NervesMCP.Tools.Device
 
   @impl EMCP.Tool
@@ -36,8 +37,14 @@ defmodule NervesMCP.Tools.SetDeviceAddress do
   @impl EMCP.Tool
   def call(_conn, %{"address" => address}) do
     case Device.set_address(address) do
-      {:ok, text} -> EMCP.Tool.response([%{"type" => "text", "text" => text}])
-      {:error, reason} -> EMCP.Tool.error(reason)
+      {:ok, text} ->
+        # The probe still holds the down mode from before there was an address,
+        # so without this the next device tool call is refused until its tick.
+        DeviceProbe.refresh()
+        EMCP.Tool.response([%{"type" => "text", "text" => text}])
+
+      {:error, reason} ->
+        EMCP.Tool.error(reason)
     end
   end
 end

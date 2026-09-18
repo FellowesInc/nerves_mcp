@@ -136,12 +136,18 @@ defmodule NervesMCP.Connection.SSHAddressTest do
 
   test "set_device_address connects to an address that checks out and caches it", ctx do
     start_ssh("#{ctx.hostname}.invalid", ctx.daemon)
+    start_supervised!(DeviceProbe)
     assert eventually(fn -> SSH.status().reason != nil end)
+    assert {:down, _detail} = DeviceProbe.refresh()
 
     assert %{"content" => [%{"text" => text}]} =
              SetDeviceAddress.call(nil, %{"address" => "127.0.0.1"})
 
     assert text == "127.0.0.1 answered as #{ctx.hostname}. Connected, and cached for next time."
+
+    # Found on hardware: "Connected", then the next tool call refused as down
+    # until the probe's next tick.
+    assert Device.ensure_up() == :ok
     assert {:ok, "2" <> _} = SSH.eval("1 + 1", 5_000)
     assert AddressCache.lookup(ctx.cache, ctx.hostname) == "127.0.0.1"
     assert SSH.status().reason == nil
