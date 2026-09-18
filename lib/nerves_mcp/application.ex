@@ -22,7 +22,7 @@ defmodule NervesMCP.Application do
 
         [
           NervesMCP.History,
-          {Bandit, plug: NervesMCP.Router, port: port},
+          {Bandit, plug: NervesMCP.Router, port: port, ip: :loopback},
           connection_child,
           NervesMCP.DeviceProbe
         ]

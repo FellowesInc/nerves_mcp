@@ -153,7 +153,7 @@ defmodule NervesMCP do
       # Find how many trailing bytes might be incomplete
       incomplete_count = trailing_incomplete_bytes(binary, size)
       complete_size = size - incomplete_count
-      <<complete::binary-size(complete_size), incomplete::binary>> = binary
+      <<complete::binary-size(^complete_size), incomplete::binary>> = binary
       {complete, incomplete}
     end
   end
@@ -167,7 +167,7 @@ defmodule NervesMCP do
     |> Range.new(check_from + 1, -1)
     |> Enum.reduce_while(0, fn pos, _acc ->
       idx = pos - 1
-      <<_::binary-size(idx), byte, _rest::binary>> = binary
+      <<_::binary-size(^idx), byte, _rest::binary>> = binary
 
       cond do
         # ASCII or valid end of multi-byte - everything complete
