@@ -10,9 +10,6 @@ All notable changes to this fork are documented here. The format follows
 - `--no-repl` starts the server without the stdin console and blocks instead, so
   it survives stdin EOF and can run from a background shell or under a process
   supervisor.
-- `--fallback-host HOST`, stored as `:fallback_host` in the `:connection` config.
-  The SSH connection alternates to it when ssh can't resolve the primary host,
-  which covers an mDNS name that stops resolving while the IP still works.
 - `device_output` returns session output buffered since a cursor, for reading
   from a process spawned on the device that keeps printing after `device_eval`
   returned.
@@ -24,8 +21,8 @@ All notable changes to this fork are documented here. The format follows
   an IEx shell on loopback, the same stack `nerves_ssh` runs on a device, so the
   eval protocol is tested against real echo and line editing.
 - Tests for CLI option parsing into the application env.
-- A README section for every tool the server exposes, the `--pass`,
-  `--fallback-host` and `--no-repl` flags, and the loopback bind.
+- A README section for every tool the server exposes, the `--pass` and
+  `--no-repl` flags, and the loopback bind.
 
 ### Changed
 

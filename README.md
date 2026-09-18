@@ -28,6 +28,9 @@ mix nerves_mcp /dev/ttyUSB0 --speed 9600
 # SSH — anything that isn't a serial path is treated as a host
 mix nerves_mcp nerves.local
 mix nerves_mcp nerves.local --user root --ssh-port 2222
+
+# An IP works as the host too, e.g. on a network where mDNS doesn't resolve
+mix nerves_mcp 192.168.1.100
 ```
 
 ### Escript
@@ -42,30 +45,18 @@ mix escript.build
 
 ### Options
 
-| Flag              | Description                                               | Default  |
-|-------------------|-----------------------------------------------------------|----------|
-| `--port`          | MCP server HTTP port                                      | `13000`  |
-| `--speed`         | Serial baud rate                                          | `115200` |
-| `--user`          | SSH username                                              | `root`   |
-| `--ssh-port`      | SSH port                                                  | `22`     |
-| `--pass`          | SSH password (needs `sshpass`; not for high-security use) |          |
-| `--fallback-host` | Second SSH host to try when the first won't resolve       |          |
-| `--serial`        | Force serial mode (pass device)                           |          |
-| `--ssh`           | Force SSH mode (pass host)                                |          |
-| `--no-repl`       | Skip the stdin console and block instead                  |          |
+| Flag         | Description                                               | Default  |
+|--------------|-----------------------------------------------------------|----------|
+| `--port`     | MCP server HTTP port                                      | `13000`  |
+| `--speed`    | Serial baud rate                                          | `115200` |
+| `--user`     | SSH username                                              | `root`   |
+| `--ssh-port` | SSH port                                                  | `22`     |
+| `--pass`     | SSH password (needs `sshpass`; not for high-security use) |          |
+| `--serial`   | Force serial mode (pass device)                           |          |
+| `--ssh`      | Force SSH mode (pass host)                                |          |
+| `--no-repl`  | Skip the stdin console and block instead                  |          |
 
 Short aliases: `-p` (port), `-s` (speed), `-u` (user).
-
-### `--fallback-host`
-
-An mDNS name like `nerves.local` stops resolving when the device reboots or the
-responder goes quiet, while the IP address still works (and the other way
-round). `--fallback-host` gives the SSH connection a second host to alternate
-to when ssh can't resolve the first:
-
-```bash
-mix nerves_mcp nerves.local --fallback-host 192.168.1.252
-```
 
 ### `--no-repl`
 
@@ -97,8 +88,7 @@ config :nerves_mcp, :connection,
   type: :ssh,
   host: "nerves.local",
   user: "root",
-  port: 22,
-  fallback_host: "192.168.1.252"
+  port: 22
 ```
 
 With config in place, you can start without any arguments:

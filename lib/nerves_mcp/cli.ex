@@ -14,7 +14,6 @@ defmodule NervesMCP.CLI do
   **SSH:**
       nerves_mcp nerves.local
       nerves_mcp --ssh nerves.local --user root --ssh-port 22
-      nerves_mcp nerves.local --fallback-host 192.168.1.252
 
   Common options:
       --port PORT    MCP server port (default: 13000)
@@ -125,7 +124,6 @@ defmodule NervesMCP.CLI do
           user: :string,
           ssh_port: :integer,
           pass: :string,
-          fallback_host: :string,
           no_repl: :boolean
         ],
         aliases: [
@@ -170,14 +168,7 @@ defmodule NervesMCP.CLI do
         "serial #{Keyword.fetch!(connection, :port)} @ #{Keyword.get(connection, :speed, 115_200)}"
 
       :ssh ->
-        "ssh #{Keyword.get(connection, :user, "root")}@#{Keyword.fetch!(connection, :host)}:#{Keyword.get(connection, :port, 22)}#{fallback_desc(connection)}"
-    end
-  end
-
-  defp fallback_desc(connection) do
-    case Keyword.get(connection, :fallback_host) do
-      nil -> ""
-      host -> " (fallback #{host})"
+        "ssh #{Keyword.get(connection, :user, "root")}@#{Keyword.fetch!(connection, :host)}:#{Keyword.get(connection, :port, 22)}"
     end
   end
 
@@ -229,13 +220,12 @@ defmodule NervesMCP.CLI do
           nerves_mcp --ssh 192.168.1.100            # Explicit SSH
 
         Options:
-          --port PORT           MCP server port (default: 13000)
-          --speed BAUD          Serial baud rate (default: 115200)
-          --user USER           SSH user (default: root)
-          --ssh-port PORT       SSH port (default: 22)
-          --pass PASSWORD       SSH password (requires sshpass; not for high-security use)
-          --fallback-host HOST  Second SSH host to try when the first won't resolve
-          --no-repl             Don't read stdin, block instead (for background runs)
+          --port PORT        MCP server port (default: 13000)
+          --speed BAUD       Serial baud rate (default: 115200)
+          --user USER        SSH user (default: root)
+          --ssh-port PORT    SSH port (default: 22)
+          --pass PASSWORD    SSH password (requires sshpass; not for high-security use)
+          --no-repl          Don't read stdin, block instead (for background runs)
 
         Connection can also be configured in config/config.exs.
         CLI arguments override config values.
@@ -277,7 +267,6 @@ defmodule NervesMCP.CLI do
     |> maybe_put(:user, Keyword.get(opts, :user))
     |> maybe_put(:port, Keyword.get(opts, :ssh_port))
     |> maybe_put(:pass, Keyword.get(opts, :pass))
-    |> maybe_put(:fallback_host, Keyword.get(opts, :fallback_host))
   end
 
   defp maybe_put(config, _key, nil), do: config

@@ -14,7 +14,6 @@ import Config
 #   type: :ssh,
 #   host: "nerves.local",
 #   user: "root",
-#   port: 22,
-#   fallback_host: "192.168.1.252"
+#   port: 22
 
 config :bun, :version, "1.3.0"

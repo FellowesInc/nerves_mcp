@@ -50,45 +50,12 @@ defmodule NervesMCP.CLITest do
       assert Keyword.fetch!(connection(), :pass) == "hunter2"
     end
 
-    test "--fallback-host lands in the connection env next to the host" do
-      CLI.configure(["nerves.local", "--fallback-host", "192.168.1.252"])
-
-      assert Keyword.fetch!(connection(), :host) == "nerves.local"
-      assert Keyword.fetch!(connection(), :fallback_host) == "192.168.1.252"
-    end
-
-    test "no --fallback-host leaves the key out" do
-      CLI.configure(["nerves.local"])
-
-      refute Keyword.has_key?(connection(), :fallback_host)
-    end
-
-    test "a fallback_host from config survives a host given on the command line" do
-      Application.put_env(:nerves_mcp, :connection,
-        type: :ssh,
-        host: "configured.local",
-        user: "root",
-        port: 22,
-        fallback_host: "192.168.1.252"
-      )
-
-      CLI.configure(["other.local"])
-
-      assert Keyword.fetch!(connection(), :host) == "other.local"
-      assert Keyword.fetch!(connection(), :fallback_host) == "192.168.1.252"
-    end
-
     test "config alone is enough, and the command line overrides it" do
-      Application.put_env(:nerves_mcp, :connection,
-        type: :ssh,
-        host: "configured.local",
-        fallback_host: "192.168.1.252"
-      )
+      Application.put_env(:nerves_mcp, :connection, type: :ssh, host: "configured.local")
 
       CLI.configure(["--user", "exnvr"])
 
       assert Keyword.fetch!(connection(), :host) == "configured.local"
-      assert Keyword.fetch!(connection(), :fallback_host) == "192.168.1.252"
       assert Keyword.fetch!(connection(), :user) == "exnvr"
     end
   end
