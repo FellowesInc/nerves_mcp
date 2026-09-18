@@ -12,6 +12,7 @@ defmodule NervesMCP.Tools.IsDeviceUp do
 
   alias NervesMCP.Connection.SSH
   alias NervesMCP.Connection.UART
+  alias NervesMCP.Tools.Device
 
   @eval_timeout 5_000
   @retry_pause 2_000
@@ -59,7 +60,7 @@ defmodule NervesMCP.Tools.IsDeviceUp do
     remaining = deadline - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
-      {:error, "Timed out waiting for device to come up"}
+      {:error, timed_out(Device.connection_status())}
     else
       eval_timeout = min(@eval_timeout, remaining)
 
@@ -78,6 +79,11 @@ defmodule NervesMCP.Tools.IsDeviceUp do
       end
     end
   end
+
+  defp timed_out(%{reason: reason}) when is_binary(reason),
+    do: "Timed out waiting for device to come up. " <> reason
+
+  defp timed_out(_nothing_to_add), do: "Timed out waiting for device to come up"
 
   defp try_eval(connection_type, timeout) do
     code = ~s|Nerves.Runtime.KV.get_active("nerves_fw_uuid")|

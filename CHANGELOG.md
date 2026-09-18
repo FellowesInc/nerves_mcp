@@ -7,6 +7,15 @@ All notable changes to this fork are documented here. The format follows
 
 ### Added
 
+- A learned device address for SSH. While the device's name answers, the
+  address it resolves to is cached per developer under the user cache
+  directory. When the name stops resolving after a reboot, the connection
+  alternates between the name and the cached address, and runs nothing on the
+  address until the device there reports the expected hostname. An address that
+  answers as another device is dropped. With no usable address, the down error,
+  `is_device_up` and `device_status` tell the agent to ask the user for the IP.
+- `set_device_address` gives the connection an address for a name that won't
+  resolve. It goes through the same hostname check and is cached on a match.
 - `--no-repl` starts the server without the stdin console and blocks instead, so
   it survives stdin EOF and can run from a background shell or under a process
   supervisor.

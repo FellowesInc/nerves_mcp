@@ -16,4 +16,8 @@ import Config
 #   user: "root",
 #   port: 22
 
+# Where the SSH connection caches device addresses (default: the user cache
+# directory, e.g. ~/Library/Caches/nerves_mcp on macOS)
+# config :nerves_mcp, :address_cache_dir, "/path/to/dir"
+
 config :bun, :version, "1.3.0"

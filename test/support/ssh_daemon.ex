@@ -12,14 +12,15 @@ defmodule NervesMCP.Test.SSHDaemon do
   ### API
 
     * `start/0` — start the daemon and return its port
+    * `start/1` — the same, with another shell in place of IEx
     * `stop/1` — stop it and remove its host key
     * `connect/1` — start the SSH connection against it and wait for a live IEx
   """
 
   @type t :: %{ref: :ssh.daemon_ref(), port: :inet.port_number(), system_dir: String.t()}
 
-  @spec start() :: t()
-  def start() do
+  @spec start({module(), atom(), list()} | function()) :: t()
+  def start(shell \\ {:iex, :start, [[], {:elixir_utils, :noop, []}]}) do
     {:ok, _} = Application.ensure_all_started(:ssh)
     {:ok, _} = Application.ensure_all_started(:iex)
 
@@ -29,7 +30,7 @@ defmodule NervesMCP.Test.SSHDaemon do
       :ssh.daemon(:loopback, 0,
         system_dir: to_charlist(system_dir),
         no_auth_needed: true,
-        shell: {:iex, :start, [[], {:elixir_utils, :noop, []}]}
+        shell: shell
       )
 
     {:ok, info} = :ssh.daemon_info(ref)
