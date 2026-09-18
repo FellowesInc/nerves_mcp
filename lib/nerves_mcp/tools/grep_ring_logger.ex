@@ -2,15 +2,66 @@ defmodule NervesMCP.Tools.GrepRingLogger do
   @moduledoc """
   Grep the device's RingLogger buffer.
 
-  Fetches log entries from `RingLogger.get/1` on the connected device,
-  formats each entry as `[level] message`, and returns lines matching
-  the given pattern. Optionally limits the output to the last N matches.
+  Fetches log entries from `RingLogger.get/1` on the connected device, formats
+  each one as `timestamp [level] message`, and returns the lines matching the
+  given pattern. Optionally limits the output to the last N matches.
+
+  The formatting and the filtering both run on the device, so only the matches
+  cross the link.
   """
 
   @behaviour EMCP.Tool
 
-  alias NervesMCP.Connection.SSH
-  alias NervesMCP.Connection.UART
+  alias NervesMCP.Tools.Device
+
+  # Runs on the device, so it is source rather than a function: RingLogger 0.8+
+  # returns entry maps, and the older {level, {logger, message, timestamp,
+  # metadata}} tuple is kept as a fallback. Anything else is inspected, which is
+  # what every entry used to fall through to.
+  @entry_formatter """
+  (fn ->
+     pad = fn number, width ->
+       number |> Integer.to_string() |> String.pad_leading(width, "0")
+     end
+
+     stamp = fn
+       {{year, month, day}, {hour, minute, second, millisecond}} ->
+         pad.(year, 4) <> "-" <> pad.(month, 2) <> "-" <> pad.(day, 2) <> " " <>
+           pad.(hour, 2) <> ":" <> pad.(minute, 2) <> ":" <> pad.(second, 2) <> "." <>
+           pad.(millisecond, 3)
+
+       {{year, month, day}, {hour, minute, second}} ->
+         pad.(year, 4) <> "-" <> pad.(month, 2) <> "-" <> pad.(day, 2) <> " " <>
+           pad.(hour, 2) <> ":" <> pad.(minute, 2) <> ":" <> pad.(second, 2)
+
+       other ->
+         inspect(other)
+     end
+
+     text = fn message ->
+       try do
+         IO.iodata_to_binary(message)
+       rescue
+         _ -> inspect(message)
+       end
+     end
+
+     line = fn level, message, timestamp ->
+       stamp.(timestamp) <> " [" <> to_string(level) <> "] " <> text.(message)
+     end
+
+     fn
+       %{level: level, message: message, timestamp: timestamp} ->
+         line.(level, message, timestamp)
+
+       {level, {_logger, message, timestamp, _metadata}} ->
+         line.(level, message, timestamp)
+
+       other ->
+         inspect(other)
+     end
+   end).()\
+  """
 
   @impl EMCP.Tool
   def name(), do: "grep_ring_logger"
@@ -54,28 +105,23 @@ defmodule NervesMCP.Tools.GrepRingLogger do
 
     code = build_code(pattern, regex?, tail)
 
-    config = Application.get_env(:nerves_mcp, :connection, [])
-    connection_type = Keyword.get(config, :type, :uart)
-
-    result =
-      try do
-        case connection_type do
-          :uart -> UART.eval_output(code, timeout)
-          :ssh -> SSH.eval_output(code, timeout)
-          other -> {:error, "Unknown connection type: #{inspect(other)}"}
-        end
-      catch
-        :exit, {:noproc, _} ->
-          {:error, "Device connection not available (process not running)"}
-
-        :exit, reason ->
-          {:error, "Device connection error: #{inspect(reason)}"}
-      end
-
-    case result do
+    case Device.eval_output(code, timeout) do
       {:ok, output} -> EMCP.Tool.response([%{"type" => "text", "text" => output}])
       {:error, reason} -> EMCP.Tool.error(reason)
     end
+  end
+
+  @doc """
+  Format one RingLogger entry the way the device-side code does.
+
+  The formatter has to run on the device, so it lives as source in
+  `@entry_formatter` and this evaluates that same source. The tests exercise it
+  here rather than over a link.
+  """
+  @spec format_entry(term()) :: String.t()
+  def format_entry(entry) do
+    {formatter, _binding} = Code.eval_string(@entry_formatter)
+    formatter.(entry)
   end
 
   defp build_code(pattern, regex?, tail) do
@@ -83,9 +129,43 @@ defmodule NervesMCP.Tools.GrepRingLogger do
 
     """
     (fn ->
+      format = #{@entry_formatter}
       pattern = #{inspect(pattern)}
       regex? = #{regex?}
       tail = #{tail_literal}
+
+      # What a pattern matches against. The application and module are in here
+      # because grepping for an app name is the common case, and they cost
+      # nothing next to formatting.
+      match_text = fn entry ->
+        {message, module, metadata} =
+          case entry do
+            %{message: message, module: module, metadata: metadata} ->
+              {message, module, metadata}
+
+            {_level, {_logger, message, _timestamp, metadata}} ->
+              {message, nil, metadata}
+
+            other ->
+              {inspect(other), nil, []}
+          end
+
+        text =
+          try do
+            IO.iodata_to_binary(message)
+          rescue
+            _ -> inspect(message)
+          end
+
+        application =
+          cond do
+            is_list(metadata) -> Keyword.get(metadata, :application)
+            is_map(metadata) -> Map.get(metadata, :application)
+            true -> nil
+          end
+
+        text <> " " <> inspect(module) <> " " <> inspect(application)
+      end
 
       matcher =
         if regex? do
@@ -111,25 +191,9 @@ defmodule NervesMCP.Tools.GrepRingLogger do
           IO.puts("Error fetching RingLogger entries: " <> msg)
 
         list when is_list(list) ->
-          lines =
-            list
-            |> Enum.map(fn
-              {level, {_logger, msg, _ts, _meta}} ->
-                formatted =
-                  try do
-                    IO.iodata_to_binary(msg)
-                  rescue
-                    _ -> inspect(msg)
-                  end
-
-                "[" <> to_string(level) <> "] " <> formatted
-
-              other ->
-                inspect(other)
-            end)
-            |> Enum.filter(matcher)
-
-          lines = if tail, do: Enum.take(lines, -tail), else: lines
+          matches = Enum.filter(list, fn entry -> matcher.(match_text.(entry)) end)
+          matches = if tail, do: Enum.take(matches, -tail), else: matches
+          lines = Enum.map(matches, format)
           Enum.each(lines, &IO.puts/1)
           length(lines)
       end

@@ -4,8 +4,11 @@ defmodule NervesMCP.DeviceProbe do
   MCP tools should be exposed.
 
   When no MCP activity has happened for `idle_threshold` ms, a small probe is
-  sent to the device. The probe evaluates the Nerves firmware UUID and classifies
-  the connection into one of:
+  sent to the device. A device that is already `:down` or `:unknown` is probed
+  on every tick instead, so a busy client does not hold off the recovery.
+
+  The probe evaluates the Nerves firmware UUID and classifies the connection
+  into one of:
 
     * `:nerves`  — Elixir evaluated and a firmware UUID came back (confirmed Nerves)
     * `:elixir`  — Elixir evaluated but no UUID (Elixir runs, not a Nerves device)
@@ -17,9 +20,10 @@ defmodule NervesMCP.DeviceProbe do
   Elixir degrades to `:shell` rather than reporting failure, so the server can
   still offer raw shell tools (see `NervesMCP.Tools.ShellEval`).
 
-  `NervesMCP.Server.server/0` reads `mode/0` on every request and lists tools
-  accordingly. On a mode change we broadcast `notifications/tools/list_changed`
-  so connected clients refetch the tool list immediately.
+  `NervesMCP.Server.server/0` reads `mode/0` on every request to pick the
+  `device_eval` implementation, and `NervesMCP.Tools.Device` reads it to refuse
+  calls while the device is down. On a mode change `notifications/tools/list_changed`
+  is broadcast for the clients holding an open stream.
   """
 
   use GenServer
@@ -33,6 +37,7 @@ defmodule NervesMCP.DeviceProbe do
   @idle_threshold 10_000
   @tick 2_000
   @probe_timeout 4_000
+  @recovering_modes [:down, :unknown]
 
   @type mode() :: :nerves | :elixir | :shell | :down | :unknown
 
@@ -79,6 +84,21 @@ defmodule NervesMCP.DeviceProbe do
     result = run_probe(timeout)
     GenServer.cast(__MODULE__, {:set_result, result})
     result
+  end
+
+  @doc """
+  Apply a UUID read the caller already has, with no probe of its own.
+
+  `is_device_up` and `is_device_updated_to` evaluate the same expression the
+  probe does, so their answer classifies the same way. Handing it over beats
+  `refresh/1`, which spends up to another #{@probe_timeout} ms past a deadline
+  the tool is already near, and which can cast a `:down` over a poll that just
+  succeeded. The cast lands on the same path a probe result does, so a mode
+  change still logs and still broadcasts `tools/list_changed`.
+  """
+  @spec record_eval(String.t()) :: :ok
+  def record_eval(result) when is_binary(result) do
+    GenServer.cast(__MODULE__, {:set_result, classify({:ok, result})})
   end
 
   # GenServer callbacks
@@ -151,6 +171,12 @@ defmodule NervesMCP.DeviceProbe do
   # Probing
 
   defp maybe_probe(%{probing?: true} = state), do: state
+
+  # A device that is already down probes on every tick. Waiting for the client
+  # to go idle first means a busy client blocks the recovery it is waiting for.
+  defp maybe_probe(%{mode: mode} = state) when mode in @recovering_modes do
+    start_probe(state)
+  end
 
   defp maybe_probe(state) do
     now = mono()

@@ -49,18 +49,18 @@ defmodule NervesMCP.Tools.DeviceStatus do
     EMCP.Tool.response([%{"type" => "text", "text" => String.trim_trailing(text)}])
   end
 
-  defp offered(:nerves),
-    do:
-      "device_eval, device_eval_output, grep_ring_logger, grep_dmesg + is_device_up, is_device_updated_to, device_status"
+  defp offered(mode) do
+    names =
+      mode
+      |> NervesMCP.Server.tools_for()
+      |> Enum.map_join(", ", & &1.name())
 
-  defp offered(:elixir),
-    do: "device_eval, device_eval_output + is_device_up, is_device_updated_to, device_status"
-
-  defp offered(:shell),
-    do:
-      "device_eval (shell), device_eval_output (shell) + is_device_up, is_device_updated_to, device_status"
-
-  defp offered(_), do: "is_device_up, is_device_updated_to, device_status"
+    case mode do
+      :shell -> names <> " (device_eval takes a shell command in this mode)"
+      mode when mode in [:down, :unknown] -> names <> " (device tools error until it is back)"
+      _other -> names
+    end
+  end
 
   defp format_ms(nil), do: "unknown"
   defp format_ms(ms), do: "#{div(ms, 1000)}s"
