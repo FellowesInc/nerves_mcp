@@ -8,10 +8,14 @@ defmodule NervesMCP.Connection.SSH do
 
   use GenServer
 
+  alias NervesMCP.Connection.EvalTemplate
+  alias NervesMCP.Connection.EvalTemplate.Matcher
+
   require Logger
 
   @initial_retry_delay 1_000
   @max_retry_delay 30_000
+  @connect_deadline_ms 20_000
 
   @type result() :: {:ok, String.t()} | {:error, String.t()}
 
@@ -79,11 +83,10 @@ defmodule NervesMCP.Connection.SSH do
   def init(_opts) do
     state = %{
       port: nil,
-      buffer: "",
       waiting: nil,
-      match_style: :elixir,
       console: nil,
-      retry_delay: @initial_retry_delay
+      retry_delay: @initial_retry_delay,
+      data_seen?: false
     }
 
     {:ok, connect(state)}
@@ -103,7 +106,11 @@ defmodule NervesMCP.Connection.SSH do
       "-o",
       "UserKnownHostsFile=/dev/null",
       "-o",
-      "ServerAliveInterval=60",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=2",
+      "-o",
+      "ConnectTimeout=10",
       "-p",
       "#{port}",
       "-tt",
@@ -130,17 +137,25 @@ defmodule NervesMCP.Connection.SSH do
         Port.open({:spawn_executable, executable}, [
           :binary,
           :exit_status,
-          args: args
+          args: args,
+          env: [{~c"TERM", ~c"dumb"}]
         ])
 
       Logger.info("SSH connection started to #{user}@#{host}:#{port}")
-      %{state | port: port_ref, retry_delay: @initial_retry_delay}
+      Process.send_after(self(), {:connect_deadline, port_ref}, connect_deadline_ms())
+      %{state | port: port_ref, data_seen?: false}
     rescue
       e ->
         Logger.error("Failed to start SSH connection: #{inspect(e)}")
         schedule_reconnect(state)
-        %{state | port: nil}
+        %{state | port: nil, data_seen?: false}
     end
+  end
+
+  defp connect_deadline_ms() do
+    :nerves_mcp
+    |> Application.get_env(:connection, [])
+    |> Keyword.get(:connect_deadline_ms, @connect_deadline_ms)
   end
 
   defp schedule_reconnect(state) do
@@ -167,142 +182,71 @@ defmodule NervesMCP.Connection.SSH do
     {:reply, :ok, state}
   end
 
-  def handle_call(:reconnect, _from, %{port: nil} = state) do
-    new_state = connect(state)
-    {:reply, if(new_state.port, do: :ok, else: {:error, "reconnect failed"}), new_state}
-  end
-
   def handle_call(:reconnect, _from, state) do
-    # Close existing port and reconnect
-    Port.close(state.port)
+    state = reply_waiting(state, {:error, "Reconnecting"})
+
+    if state.port do
+      Port.close(state.port)
+    end
+
     new_state = connect(%{state | port: nil})
     {:reply, if(new_state.port, do: :ok, else: {:error, "reconnect failed"}), new_state}
   end
 
-  @impl true
-  def handle_call({:eval, _code, _timeout}, _from, %{port: nil} = state) do
+  def handle_call({op, _payload, _timeout}, _from, %{port: nil} = state)
+      when op in [:eval, :eval_output, :shell_eval, :shell_eval_output] do
     {:reply, {:error, "Device not connected (reconnecting...)"}, state}
+  end
+
+  # One expression at a time. A second one would overwrite the first caller's
+  # marker and strand it until its timeout.
+  def handle_call({op, _payload, _timeout}, _from, %{waiting: waiting} = state)
+      when op in [:eval, :eval_output, :shell_eval, :shell_eval_output] and not is_nil(waiting) do
+    {:reply, {:error, "busy"}, state}
   end
 
   def handle_call({:eval, code, timeout}, from, state) do
-    marker = generate_marker()
+    marker = EvalTemplate.marker()
 
-    wrapped_code = """
-    (fn ->
-      result = try do
-        {value, _binding} = Code.eval_string(#{inspect(code)})
-        {:ok, inspect(value, pretty: true, limit: :infinity)}
-      rescue
-        e -> {:error, Exception.format(:error, e, __STACKTRACE__)}
-      catch
-        kind, reason -> {:error, Exception.format(kind, reason, __STACKTRACE__)}
-      end
-      IO.puts("#{marker}_START")
-      case result do
-        {:ok, output} -> IO.puts(output)
-        {:error, msg} -> IO.puts("ERROR: " <> msg)
-      end
-      IO.puts("#{marker}_END")
-      :ok
-    end).()
-    """
-
-    Port.command(state.port, wrapped_code <> "\n\n")
-
-    timer_ref = Process.send_after(self(), {:timeout, from}, timeout)
-
-    {:noreply, %{state | waiting: {from, marker, timer_ref, ""}, match_style: :elixir}}
-  end
-
-  def handle_call({:eval_output, _code, _timeout}, _from, %{port: nil} = state) do
-    {:reply, {:error, "Device not connected (reconnecting...)"}, state}
+    start_call(state, from,
+      data: EvalTemplate.eval(code, marker) <> "\n\n",
+      matcher: EvalTemplate.matcher(marker, :elixir),
+      timeout: timeout,
+      tag: :timeout
+    )
   end
 
   def handle_call({:eval_output, code, timeout}, from, state) do
-    marker = generate_marker()
+    marker = EvalTemplate.marker()
 
-    # Wrap code to capture IO output using StringIO
-    wrapped_code = """
-    (fn ->
-      {:ok, capture_pid} = StringIO.open("")
-      old_gl = Process.group_leader()
-      Process.group_leader(self(), capture_pid)
-
-      {output, result} = try do
-        {value, _binding} = Code.eval_string(#{inspect(code)})
-        Process.group_leader(self(), old_gl)
-        {_, captured} = StringIO.contents(capture_pid)
-        {captured, {:ok, inspect(value, pretty: true, limit: :infinity)}}
-      rescue
-        e ->
-          Process.group_leader(self(), old_gl)
-          {_, captured} = StringIO.contents(capture_pid)
-          {captured, {:error, Exception.format(:error, e, __STACKTRACE__)}}
-      catch
-        kind, reason ->
-          Process.group_leader(self(), old_gl)
-          {_, captured} = StringIO.contents(capture_pid)
-          {captured, {:error, Exception.format(kind, reason, __STACKTRACE__)}}
-      end
-
-      StringIO.close(capture_pid)
-
-      IO.puts("#{marker}_START")
-      IO.puts("OUTPUT:")
-      IO.write(output)
-      IO.puts("RESULT:")
-      case result do
-        {:ok, val} -> IO.puts(val)
-        {:error, msg} -> IO.puts("ERROR: " <> msg)
-      end
-      IO.puts("#{marker}_END")
-      :ok
-    end).()
-    """
-
-    Port.command(state.port, wrapped_code <> "\n\n")
-
-    timer_ref = Process.send_after(self(), {:timeout, from}, timeout)
-
-    {:noreply, %{state | waiting: {from, marker, timer_ref, ""}, match_style: :elixir}}
-  end
-
-  def handle_call({:shell_eval, _command, _timeout}, _from, %{port: nil} = state) do
-    {:reply, {:error, "Device not connected (reconnecting...)"}, state}
+    start_call(state, from,
+      data: EvalTemplate.eval_output(code, marker) <> "\n\n",
+      matcher: EvalTemplate.matcher(marker, :elixir),
+      timeout: timeout,
+      tag: :timeout
+    )
   end
 
   def handle_call({:shell_eval, command, timeout}, from, state) do
-    marker = generate_marker()
-    wrapped = "echo '#{marker}_START'\n#{command}\necho '#{marker}_END'\n"
+    marker = EvalTemplate.marker()
 
-    Port.command(state.port, wrapped)
-
-    timer_ref = Process.send_after(self(), {:timeout, from}, timeout)
-
-    {:noreply, %{state | waiting: {from, marker, timer_ref, ""}, match_style: :shell}}
-  end
-
-  def handle_call({:shell_eval_output, _command, _timeout}, _from, %{port: nil} = state) do
-    {:reply, {:error, "Device not connected (reconnecting...)"}, state}
+    start_call(state, from,
+      data: EvalTemplate.shell_eval(command, marker),
+      matcher: EvalTemplate.matcher(marker, :shell),
+      timeout: timeout,
+      tag: :timeout
+    )
   end
 
   def handle_call({:shell_eval_output, command, timeout}, from, state) do
-    marker = generate_marker()
+    marker = EvalTemplate.marker()
 
-    wrapped =
-      "echo '#{marker}_START'\n" <>
-        "echo 'OUTPUT:'\n" <>
-        "#{command} 2>&1\n" <>
-        "__mcp_rc=$?\n" <>
-        "echo 'RESULT:'\n" <>
-        "echo \"Exit code: $__mcp_rc\"\n" <>
-        "echo '#{marker}_END'\n"
-
-    Port.command(state.port, wrapped)
-
-    timer_ref = Process.send_after(self(), {:timeout, from}, timeout)
-
-    {:noreply, %{state | waiting: {from, marker, timer_ref, ""}, match_style: :shell}}
+    start_call(state, from,
+      data: EvalTemplate.shell_eval_output(command, marker),
+      matcher: EvalTemplate.matcher(marker, :shell),
+      timeout: timeout,
+      tag: :timeout
+    )
   end
 
   def handle_call({:probe, _timeout}, _from, %{port: nil} = state) do
@@ -315,34 +259,14 @@ defmodule NervesMCP.Connection.SSH do
   end
 
   def handle_call({:probe, timeout}, from, state) do
-    marker = generate_marker()
-    code = ~s|Nerves.Runtime.KV.get_active("nerves_fw_uuid")|
+    marker = EvalTemplate.marker()
 
-    wrapped_code = """
-    (fn ->
-      result = try do
-        {value, _binding} = Code.eval_string(#{inspect(code)})
-        {:ok, inspect(value, pretty: true, limit: :infinity)}
-      rescue
-        e -> {:error, Exception.format(:error, e, __STACKTRACE__)}
-      catch
-        kind, reason -> {:error, Exception.format(kind, reason, __STACKTRACE__)}
-      end
-      IO.puts("#{marker}_START")
-      case result do
-        {:ok, output} -> IO.puts(output)
-        {:error, msg} -> IO.puts("ERROR: " <> msg)
-      end
-      IO.puts("#{marker}_END")
-      :ok
-    end).()
-    """
-
-    Port.command(state.port, wrapped_code <> "\n\n")
-
-    timer_ref = Process.send_after(self(), {:probe_timeout, from}, timeout)
-
-    {:noreply, %{state | waiting: {from, marker, timer_ref, ""}, match_style: :elixir}}
+    start_call(state, from,
+      data: EvalTemplate.eval(EvalTemplate.probe_code(), marker) <> "\n\n",
+      matcher: EvalTemplate.matcher(marker, :elixir),
+      timeout: timeout,
+      tag: :probe_timeout
+    )
   end
 
   @impl true
@@ -356,59 +280,59 @@ defmodule NervesMCP.Connection.SSH do
   end
 
   @impl true
-  def handle_info({port, {:data, data}}, %{port: port, waiting: nil, console: nil} = state) do
+  def handle_info({port, {:data, data}}, %{port: port} = state) do
     NervesMCP.History.push(data)
-    {:noreply, state}
-  end
+    state = note_data(state)
 
-  def handle_info(
-        {port, {:data, data}},
-        %{port: port, waiting: nil, console: {pid, _ref}} = state
-      ) do
-    NervesMCP.History.push(data)
-    send(pid, {:console_data, data})
-    {:noreply, state}
-  end
+    case state.waiting do
+      nil ->
+        if state.console do
+          {pid, _ref} = state.console
+          send(pid, {:console_data, data})
+        end
 
-  def handle_info(
-        {port, {:data, data}},
-        %{port: port, waiting: {from, marker, timer_ref, acc}} = state
-      ) do
-    NervesMCP.History.push(data)
-    new_acc = acc <> data
+        {:noreply, state}
 
-    case match_markers(new_acc, marker, state.match_style) do
-      {:done, result} ->
-        Process.cancel_timer(timer_ref)
-        GenServer.reply(from, {:ok, result})
-        {:noreply, %{state | waiting: nil}}
+      waiting ->
+        case Matcher.feed(waiting.matcher, data) do
+          {:done, result} ->
+            cancel_timer(waiting)
+            GenServer.reply(waiting.from, {:ok, result})
+            {:noreply, %{state | waiting: nil}}
 
-      {:cont, acc2} ->
-        {:noreply, %{state | waiting: {from, marker, timer_ref, acc2}}}
+          {:cont, matcher} ->
+            {:noreply, %{state | waiting: %{waiting | matcher: matcher}}}
+        end
     end
   end
+
+  # ssh can sit for minutes on a name that won't resolve, and on macOS an mDNS
+  # name that has gone quiet does exactly that. Give up on a silent attempt and
+  # retry with backoff, so a name that comes back after a reboot is picked up.
+  def handle_info({:connect_deadline, port}, %{port: port, data_seen?: false} = state) do
+    Logger.warning("No response from the device within the connect deadline, reconnecting")
+
+    Port.close(state.port)
+
+    new_state = %{state | port: nil, retry_delay: next_retry_delay(state.retry_delay)}
+
+    schedule_reconnect(new_state)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:connect_deadline, _port}, state), do: {:noreply, state}
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Logger.error("SSH process exited with status: #{status}")
 
-    if state.waiting do
-      {from, _marker, timer_ref, _acc} = state.waiting
-      Process.cancel_timer(timer_ref)
-      GenServer.reply(from, {:error, "SSH connection closed unexpectedly"})
-    end
+    state = reply_waiting(state, {:error, "SSH connection closed unexpectedly"})
 
-    # Notify console of disconnection
     if state.console do
       {pid, _ref} = state.console
       send(pid, {:console_data, "\r\n--- SSH connection lost, reconnecting... ---\r\n"})
     end
 
-    new_state = %{
-      state
-      | port: nil,
-        waiting: nil,
-        retry_delay: next_retry_delay(state.retry_delay)
-    }
+    new_state = %{state | port: nil, retry_delay: next_retry_delay(state.retry_delay)}
 
     schedule_reconnect(new_state)
     {:noreply, new_state}
@@ -434,19 +358,25 @@ defmodule NervesMCP.Connection.SSH do
     {:noreply, state}
   end
 
-  def handle_info({:probe_timeout, from}, %{waiting: {from, _marker, _timer_ref, acc}} = state) do
-    reply = if String.trim(acc) == "", do: :down, else: :noise
-    GenServer.reply(from, reply)
+  def handle_info({:probe_timeout, from}, %{waiting: %{from: from} = waiting} = state) do
+    GenServer.reply(from, if(Matcher.output?(waiting.matcher), do: :noise, else: :down))
     {:noreply, %{state | waiting: nil}}
   end
 
-  def handle_info({:probe_timeout, _from}, state) do
-    {:noreply, state}
-  end
+  def handle_info({:timeout, from}, %{waiting: %{from: from}} = state) do
+    # The expression that timed out may be half typed on the device, where it
+    # would swallow every later eval.
+    if state.port do
+      Port.command(state.port, "#iex:break\n")
+    end
 
-  def handle_info({:timeout, from}, state) do
     GenServer.reply(from, {:error, "Timeout waiting for device response"})
     {:noreply, %{state | waiting: nil}}
+  end
+
+  # A timer for a call that already answered. Its caller is long gone.
+  def handle_info({tag, _from}, state) when tag in [:timeout, :probe_timeout] do
+    {:noreply, state}
   end
 
   def handle_info({:DOWN, ref, :process, pid, _reason}, %{console: {pid, ref}} = state) do
@@ -466,54 +396,46 @@ defmodule NervesMCP.Connection.SSH do
     :ok
   end
 
-  defp generate_marker() do
-    :crypto.strong_rand_bytes(8) |> Base.encode16()
+  defp start_call(state, from, opts) do
+    Port.command(state.port, Keyword.fetch!(opts, :data))
+
+    message = {Keyword.fetch!(opts, :tag), from}
+    timer = Process.send_after(self(), message, Keyword.fetch!(opts, :timeout))
+
+    waiting = %{
+      from: from,
+      matcher: Keyword.fetch!(opts, :matcher),
+      timer: timer,
+      message: message
+    }
+
+    {:noreply, %{state | waiting: waiting}}
   end
 
-  # Elixir (IEx) output anchors the markers to the printed lines (`...START\r\n`)
-  # to skip the PTY-echoed source. Shell output uses lenient bare markers,
-  # matching the density device_mcp behaviour.
-  defp match_markers(acc, marker, :elixir) do
-    start_marker = "#{marker}_START\r\n"
-    end_marker = "#{marker}_END\r\n"
+  defp reply_waiting(%{waiting: nil} = state, _reply), do: state
 
-    acc =
-      if String.contains?(acc, start_marker) do
-        [_, rest] = String.split(acc, start_marker, parts: 2)
-        rest
-      else
-        acc
-      end
+  defp reply_waiting(%{waiting: waiting} = state, reply) do
+    cancel_timer(waiting)
+    GenServer.reply(waiting.from, reply)
+    %{state | waiting: nil}
+  end
 
-    if String.contains?(acc, end_marker) do
-      [result | _] = String.split(acc, end_marker)
-      {:done, result}
-    else
-      {:cont, acc}
+  # Cancelling is not enough. The timer may already have fired, and the message
+  # would then arrive for a call that is finished.
+  defp cancel_timer(waiting) do
+    Process.cancel_timer(waiting.timer, info: false)
+    message = waiting.message
+
+    receive do
+      ^message -> :ok
+    after
+      0 -> :ok
     end
   end
 
-  defp match_markers(acc, marker, :shell) do
-    start_marker = "#{marker}_START"
-    end_marker = "#{marker}_END"
-
-    acc =
-      if String.contains?(acc, start_marker) do
-        [_, rest] = String.split(acc, start_marker, parts: 2)
-
-        rest
-        |> String.replace_leading("\r\n", "")
-        |> String.replace_leading("\r", "")
-        |> String.replace_leading("\n", "")
-      else
-        acc
-      end
-
-    if String.contains?(acc, end_marker) do
-      [result | _] = String.split(acc, end_marker)
-      {:done, String.trim_trailing(result)}
-    else
-      {:cont, acc}
-    end
-  end
+  # The backoff resets on device output, not on `Port.open`. Opening succeeds
+  # even when ssh then exits 255 because the host does not resolve, and retrying
+  # that every two seconds forever is no use to anyone.
+  defp note_data(%{data_seen?: true} = state), do: state
+  defp note_data(state), do: %{state | data_seen?: true, retry_delay: @initial_retry_delay}
 end
