@@ -17,14 +17,40 @@ defmodule NervesMCP.CLI do
 
   Common options:
       --port PORT    MCP server port (default: 13000)
+      --no-repl      Don't read stdin; block instead
+
+  Without `--no-repl` the foreground is `repl/0`, an `IO.gets` loop that
+  returns on stdin EOF and takes the VM with it. `--no-repl` blocks forever
+  instead, so the server survives EOF and can run from a background shell or
+  under a process supervisor.
   """
 
   @serial_patterns ["/dev/tty", "/dev/cu.", "/dev/serial"]
 
+  @typedoc "Parsed CLI configuration, as stored in the application env."
+  @type config() :: %{
+          connection: keyword(),
+          mcp_port: pos_integer(),
+          repl?: boolean()
+        }
+
   @spec main([String.t()]) :: :ok
   def main(args) do
-    run(args)
-    repl()
+    args
+    |> run()
+    |> serve()
+  end
+
+  @doc """
+  Block on the configured foreground: the stdin repl, or forever under
+  `--no-repl`.
+  """
+  @spec serve(config()) :: :ok
+  def serve(%{repl?: true}), do: repl()
+
+  def serve(%{repl?: false}) do
+    IO.puts("Running with --no-repl. Ctrl-C to stop.")
+    Process.sleep(:infinity)
   end
 
   @spec repl() :: :ok
@@ -52,8 +78,42 @@ defmodule NervesMCP.CLI do
   defp handle_command(""), do: :ok
   defp handle_command(other), do: IO.puts("Unknown command: #{other}. Type 'help' for commands.")
 
-  @spec run([String.t()]) :: :ok | nil
+  @doc """
+  Parse args into the application env, then start the children.
+
+  The escript path. Its wrapper starts the application first, so any children
+  already up from `config/config.exs` are replaced. `Mix.Tasks.NervesMcp`
+  configures before `app.start` instead and doesn't call this.
+  """
+  @spec run([String.t()]) :: config()
   def run(args) do
+    config = configure(args)
+
+    start_children(config.connection, config.mcp_port)
+    announce(config)
+
+    config
+  end
+
+  @doc """
+  Print the port and connection the server came up on, and how to point Claude
+  Code at it.
+  """
+  @spec announce(config()) :: :ok
+  def announce(config) do
+    IO.puts(
+      "NervesMCP started on port #{config.mcp_port} via #{connection_desc(config.connection)}"
+    )
+
+    maybe_print_claude_hint(config.mcp_port)
+  end
+
+  @doc """
+  Parse args, merge them over `config/config.exs` and store the result in the
+  application env. Starts nothing.
+  """
+  @spec configure([String.t()]) :: config()
+  def configure(args) do
     {opts, positional, _} =
       OptionParser.parse(args,
         strict: [
@@ -63,7 +123,8 @@ defmodule NervesMCP.CLI do
           speed: :integer,
           user: :string,
           ssh_port: :integer,
-          pass: :string
+          pass: :string,
+          no_repl: :boolean
         ],
         aliases: [
           p: :port,
@@ -74,25 +135,41 @@ defmodule NervesMCP.CLI do
 
     existing_config = Application.get_env(:nerves_mcp, :connection, [])
     connection = resolve_connection(opts, positional, existing_config)
-    mcp_port = Keyword.get(opts, :port, Application.get_env(:nerves_mcp, :port, 13000))
+
+    mcp_port =
+      opts
+      |> Keyword.get(:port, Application.get_env(:nerves_mcp, :port, 13000))
+      |> validate_mcp_port!()
 
     Application.put_env(:nerves_mcp, :connection, connection)
     Application.put_env(:nerves_mcp, :port, mcp_port)
 
-    start_children(connection, mcp_port)
+    %{
+      connection: connection,
+      mcp_port: mcp_port,
+      repl?: not Keyword.get(opts, :no_repl, false)
+    }
+  end
 
-    connection_desc =
-      case Keyword.fetch!(connection, :type) do
-        :uart ->
-          "serial #{Keyword.fetch!(connection, :port)} @ #{Keyword.get(connection, :speed, 115_200)}"
+  # Bandit accepts 0 as "any free port", but then the startup banner and the
+  # `claude mcp add` hint both print 0 and nobody can reach the server. Rejected
+  # along with the rest of the out-of-range values.
+  defp validate_mcp_port!(port) when is_integer(port) and port in 1..65_535, do: port
 
-        :ssh ->
-          "ssh #{Keyword.get(connection, :user, "root")}@#{Keyword.fetch!(connection, :host)}:#{Keyword.get(connection, :port, 22)}"
-      end
+  defp validate_mcp_port!(port) do
+    raise ArgumentError,
+          "invalid MCP port #{inspect(port)}, expected an integer in 1..65535 " <>
+            "(--port, or :port in config/config.exs)"
+  end
 
-    IO.puts("NervesMCP started on port #{mcp_port} via #{connection_desc}")
+  defp connection_desc(connection) do
+    case Keyword.fetch!(connection, :type) do
+      :uart ->
+        "serial #{Keyword.fetch!(connection, :port)} @ #{Keyword.get(connection, :speed, 115_200)}"
 
-    maybe_print_claude_hint(mcp_port)
+      :ssh ->
+        "ssh #{Keyword.get(connection, :user, "root")}@#{Keyword.fetch!(connection, :host)}:#{Keyword.get(connection, :port, 22)}"
+    end
   end
 
   defp maybe_print_claude_hint(mcp_port) do
@@ -102,6 +179,8 @@ defmodule NervesMCP.CLI do
       Claude Code detected. Add this MCP server with:
         claude mcp add --transport http nerves http://localhost:#{mcp_port}/mcp
       """)
+    else
+      :ok
     end
   end
 
@@ -134,10 +213,11 @@ defmodule NervesMCP.CLI do
         Examples:
           nerves_mcp /dev/ttyUSB0                   # Serial connection
           nerves_mcp /dev/ttyUSB0 --speed 9600      # Serial with custom baud rate
-          nerves_mcp nerves.local                    # SSH connection
-          nerves_mcp nerves.local --user root        # SSH with custom user
-          nerves_mcp --serial /dev/ttyACM0           # Explicit serial
-          nerves_mcp --ssh 192.168.1.100             # Explicit SSH
+          nerves_mcp nerves.local                   # SSH connection
+          nerves_mcp nerves.local --user root       # SSH with custom user
+          nerves_mcp nerves.local --no-repl         # No stdin console
+          nerves_mcp --serial /dev/ttyACM0          # Explicit serial
+          nerves_mcp --ssh 192.168.1.100            # Explicit SSH
 
         Options:
           --port PORT        MCP server port (default: 13000)
@@ -145,6 +225,7 @@ defmodule NervesMCP.CLI do
           --user USER        SSH user (default: root)
           --ssh-port PORT    SSH port (default: 22)
           --pass PASSWORD    SSH password (requires sshpass; not for high-security use)
+          --no-repl          Don't read stdin, block instead (for background runs)
 
         Connection can also be configured in config/config.exs.
         CLI arguments override config values.
@@ -202,6 +283,8 @@ defmodule NervesMCP.CLI do
         :ssh -> NervesMCP.Connection.SSH
       end
 
+    stop_children()
+
     children = [
       NervesMCP.History,
       {Bandit, plug: NervesMCP.Router, port: mcp_port, ip: :loopback},
@@ -211,6 +294,17 @@ defmodule NervesMCP.CLI do
 
     for child <- children do
       Supervisor.start_child(NervesMCP.Supervisor, child)
+    end
+  end
+
+  # `NervesMCP.Application` already started this set from config/config.exs when
+  # the config names a `:type`, on the config port and against the config host.
+  # Bandit's child id is a fresh reference every time, so a second start_child
+  # leaves two listeners rather than colliding.
+  defp stop_children() do
+    for {id, _pid, _type, _modules} <- Supervisor.which_children(NervesMCP.Supervisor) do
+      Supervisor.terminate_child(NervesMCP.Supervisor, id)
+      Supervisor.delete_child(NervesMCP.Supervisor, id)
     end
   end
 end

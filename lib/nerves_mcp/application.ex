@@ -13,7 +13,8 @@ defmodule NervesMCP.Application do
 
     children =
       if Keyword.has_key?(config, :type) do
-        # Connection configured via config.exs — start everything
+        # Configured, either by config.exs or by `mix nerves_mcp` parsing its
+        # args before app.start. Start everything.
         connection_child =
           case Keyword.fetch!(config, :type) do
             :uart -> NervesMCP.Connection.UART
@@ -29,7 +30,8 @@ defmodule NervesMCP.Application do
           NervesMCP.DeviceProbe
         ]
       else
-        # No config — CLI.run/1 will start children later
+        # Nothing configured yet. The escript starts the app before its args are
+        # parsed, so `NervesMCP.CLI.run/1` starts the children.
         []
       end
 

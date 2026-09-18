@@ -28,6 +28,9 @@ mix nerves_mcp /dev/ttyUSB0 --speed 9600
 # SSH — anything that isn't a serial path is treated as a host
 mix nerves_mcp nerves.local
 mix nerves_mcp nerves.local --user root --ssh-port 2222
+
+# An IP works as the host too, e.g. on a network where mDNS doesn't resolve
+mix nerves_mcp 192.168.1.100
 ```
 
 ### Escript
@@ -42,16 +45,31 @@ mix escript.build
 
 ### Options
 
-| Flag           | Description                        | Default   |
-|----------------|------------------------------------|-----------|
-| `--port`       | MCP server HTTP port               | `13000`   |
-| `--speed`      | Serial baud rate                   | `115200`  |
-| `--user`       | SSH username                       | `root`    |
-| `--ssh-port`   | SSH port                           | `22`      |
-| `--serial`     | Force serial mode (pass device)    |           |
-| `--ssh`        | Force SSH mode (pass host)         |           |
+| Flag         | Description                                               | Default  |
+|--------------|-----------------------------------------------------------|----------|
+| `--port`     | MCP server HTTP port                                      | `13000`  |
+| `--speed`    | Serial baud rate                                          | `115200` |
+| `--user`     | SSH username                                              | `root`   |
+| `--ssh-port` | SSH port                                                  | `22`     |
+| `--pass`     | SSH password (needs `sshpass`; not for high-security use) |          |
+| `--serial`   | Force serial mode (pass device)                           |          |
+| `--ssh`      | Force SSH mode (pass host)                                |          |
+| `--no-repl`  | Skip the stdin console and block instead                  |          |
 
 Short aliases: `-p` (port), `-s` (speed), `-u` (user).
+
+### `--no-repl`
+
+By default the foreground is the stdin console, which exits on EOF and takes the
+server with it. `--no-repl` blocks instead, so the server survives a closed
+stdin and can run from a background shell or under a process supervisor:
+
+```bash
+nohup ./nerves_mcp nerves.local --no-repl > nerves_mcp.log 2>&1 &
+```
+
+Ctrl-C still stops it. Under the escript that exits straight away; under `mix`
+it opens the Erlang break menu, where `a` aborts.
 
 ### Configuration file
 
@@ -105,6 +123,10 @@ http://localhost:13000/mcp
 
 Or whatever port you specified with `--port`.
 
+The HTTP server binds to loopback only. The `/mcp` endpoint has no
+authentication and `device_eval` runs code on the connected device, so it is
+not something to expose on a network.
+
 ## MCP Tools
 
 ### device_eval
@@ -115,6 +137,10 @@ Evaluates Elixir code on the device and returns the expression's return value.
 
 Evaluates Elixir code and captures IO output (what the code prints via `IO.puts`, `IO.write`, etc.) in addition to the return value.
 
+### device_output
+
+Returns session output buffered since a cursor you pass in, and the new cursor. For reading output from something spawned on the device that keeps printing after `device_eval` returned.
+
 ### grep_ring_logger
 
 Filters the device's `RingLogger` buffer by a substring or regex pattern. Optional `tail` returns only the last N matches.
@@ -122,6 +148,25 @@ Filters the device's `RingLogger` buffer by a substring or regex pattern. Option
 ### grep_dmesg
 
 Filters the device's `dmesg` (kernel ring buffer) by a substring or regex pattern. Optional `tail` returns only the last N matches.
+
+### is_device_up
+
+Polls the device for its firmware UUID until it answers or the timeout runs out. Use it to wait out a reboot. `timeout` defaults to 60000 ms.
+
+### is_device_updated_to
+
+Same poll as `is_device_up`, but against an `expected_uuid`. Errors if the device comes back on a different UUID, which is how a reverted firmware update shows up.
+
+### device_status
+
+Reports what the probe currently detects on the other end of the connection (`nerves`, `elixir`, `shell`, `down` or `unknown`), and which tools that state offers. Pass `refresh: true` to probe now instead of reading the cached result.
+
+### When the device is down
+
+The tool list doesn't shrink. Tools that need a live device stay listed and
+return an error pointing the caller at `is_device_up`, so a client that fetched
+the list before a reboot doesn't lose the tools it needs to wait for the device
+to come back.
 
 ## Interactive Console
 
