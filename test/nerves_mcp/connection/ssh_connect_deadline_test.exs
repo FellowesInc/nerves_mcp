@@ -1,4 +1,4 @@
-defmodule NervesMCP.Connection.SSHFallbackTest do
+defmodule NervesMCP.Connection.SSHConnectDeadlineTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -15,24 +15,7 @@ defmodule NervesMCP.Connection.SSHFallbackTest do
 
   # Nothing is listening, so ssh exits 255 every time and no device output ever
   # arrives. Every attempt is then a first attempt.
-  test "attempts alternate between host and fallback_host, backing off as they go" do
-    Application.put_env(:nerves_mcp, :connection,
-      type: :ssh,
-      host: "127.0.0.1",
-      fallback_host: "localhost",
-      port: closed_port(),
-      user: "nobody"
-    )
-
-    log = capture_log(fn -> run_for(4_000) end)
-
-    assert ["127.0.0.1", "localhost" | _] =
-             logged(log, ~r/SSH connection started to nobody@(\S+):/)
-
-    assert ["2000", "4000" | _] = logged(log, ~r/Scheduling SSH reconnection in (\d+)ms/)
-  end
-
-  test "without a fallback_host every attempt goes to host" do
+  test "attempts that get no answer keep retrying host, backing off as they go" do
     Application.put_env(:nerves_mcp, :connection,
       type: :ssh,
       host: "127.0.0.1",
@@ -44,73 +27,31 @@ defmodule NervesMCP.Connection.SSHFallbackTest do
 
     assert ["127.0.0.1", "127.0.0.1" | _] =
              logged(log, ~r/SSH connection started to nobody@(\S+):/)
+
+    assert ["2000", "4000" | _] = logged(log, ~r/Scheduling SSH reconnection in (\d+)ms/)
   end
 
   # The listener takes the TCP connection and then says nothing, so ssh waits on
   # a banner that never comes. That is what an mDNS name that has stopped
   # resolving looks like from here.
-  test "a silent attempt gives up at the connect deadline and tries the other host" do
+  test "a silent attempt is closed at the connect deadline and retried on the same host" do
     Application.put_env(:nerves_mcp, :connection,
       type: :ssh,
       host: "127.0.0.1",
-      fallback_host: "localhost",
       port: silent_port(),
       user: "nobody",
-      connect_deadline_ms: 1_500
+      connect_deadline_ms: 1_000
     )
 
     log = capture_log(fn -> run_for(5_000) end)
 
-    assert log =~ "No response from the device within the connect deadline"
+    assert [_first, _second | _] =
+             Regex.scan(~r/No response from the device within the connect deadline/, log)
 
-    assert ["127.0.0.1", "localhost" | _] =
+    assert ["127.0.0.1", "127.0.0.1" | _] =
              logged(log, ~r/SSH connection started to nobody@(\S+):/)
-  end
 
-  # The polling tools reconnect on a failed eval long before the deadline, so
-  # this is the path that decides whether fallback_host is ever tried.
-  test "an explicit reconnect moves a silent attempt to the other host" do
-    Application.put_env(:nerves_mcp, :connection,
-      type: :ssh,
-      host: "127.0.0.1",
-      fallback_host: "localhost",
-      port: silent_port(),
-      user: "nobody",
-      connect_deadline_ms: 60_000
-    )
-
-    log =
-      capture_log(fn ->
-        start_supervised!(SSH)
-        assert :ok = SSH.reconnect()
-        stop_supervised!(SSH)
-      end)
-
-    assert ["127.0.0.1", "localhost" | _] =
-             logged(log, ~r/SSH connection started to nobody@(\S+):/)
-  end
-
-  # Nothing is listening, so the first attempt exits 255 and has already moved to
-  # fallback_host. An explicit reconnect in that window must not move it back.
-  test "an explicit reconnect keeps the host an exited attempt already chose" do
-    Application.put_env(:nerves_mcp, :connection,
-      type: :ssh,
-      host: "127.0.0.1",
-      fallback_host: "localhost",
-      port: closed_port(),
-      user: "nobody"
-    )
-
-    log =
-      capture_log(fn ->
-        start_supervised!(SSH)
-        Process.sleep(1_000)
-        assert :ok = SSH.reconnect()
-        stop_supervised!(SSH)
-      end)
-
-    assert ["127.0.0.1", "localhost" | _] =
-             logged(log, ~r/SSH connection started to nobody@(\S+):/)
+    assert ["2000", "4000" | _] = logged(log, ~r/Scheduling SSH reconnection in (\d+)ms/)
   end
 
   defp run_for(duration) do

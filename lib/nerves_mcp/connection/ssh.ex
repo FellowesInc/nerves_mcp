@@ -86,8 +86,7 @@ defmodule NervesMCP.Connection.SSH do
       waiting: nil,
       console: nil,
       retry_delay: @initial_retry_delay,
-      data_seen?: false,
-      fallback?: false
+      data_seen?: false
     }
 
     {:ok, connect(state)}
@@ -96,7 +95,7 @@ defmodule NervesMCP.Connection.SSH do
   defp connect(state) do
     config = Application.get_env(:nerves_mcp, :connection, [])
 
-    host = target_host(config, state.fallback?)
+    host = Keyword.fetch!(config, :host)
     user = Keyword.get(config, :user, "root")
     port = Keyword.get(config, :port, 22)
     pass = Keyword.get(config, :pass)
@@ -159,14 +158,6 @@ defmodule NervesMCP.Connection.SSH do
     |> Keyword.get(:connect_deadline_ms, @connect_deadline_ms)
   end
 
-  # `fallback_host` is optional. Without it every attempt goes to `host`.
-  defp target_host(config, fallback?) do
-    case {fallback?, Keyword.get(config, :fallback_host)} do
-      {true, fallback} when is_binary(fallback) -> fallback
-      _no_fallback -> Keyword.fetch!(config, :host)
-    end
-  end
-
   defp schedule_reconnect(state) do
     Logger.info("Scheduling SSH reconnection in #{state.retry_delay}ms")
     Process.send_after(self(), :reconnect, state.retry_delay)
@@ -174,23 +165,6 @@ defmodule NervesMCP.Connection.SSH do
 
   defp next_retry_delay(current) do
     min(current * 2, @max_retry_delay)
-  end
-
-  # Nothing came back from this host, so the next attempt tries the other one.
-  # A connection that did work stays where it is.
-  defp next_host(%{data_seen?: false, fallback?: fallback?}), do: not fallback?
-  defp next_host(%{fallback?: fallback?}), do: fallback?
-
-  # An explicit reconnect kills a live attempt, so it picks the next host the
-  # same way the connect deadline does. The polling tools call `reconnect/0`
-  # after a 5 s eval failure, well inside the 20 s deadline, so without this the
-  # same silent host is restarted forever and `fallback_host` is never tried. An
-  # attempt that already exited chose its host on the way out.
-  defp close_attempt(%{port: nil} = state), do: state
-
-  defp close_attempt(state) do
-    Port.close(state.port)
-    %{state | port: nil, fallback?: next_host(state)}
   end
 
   @impl true
@@ -209,9 +183,13 @@ defmodule NervesMCP.Connection.SSH do
   end
 
   def handle_call(:reconnect, _from, state) do
-    state = state |> reply_waiting({:error, "Reconnecting"}) |> close_attempt()
+    state = reply_waiting(state, {:error, "Reconnecting"})
 
-    new_state = connect(state)
+    if state.port do
+      Port.close(state.port)
+    end
+
+    new_state = connect(%{state | port: nil})
     {:reply, if(new_state.port, do: :ok, else: {:error, "reconnect failed"}), new_state}
   end
 
@@ -330,18 +308,13 @@ defmodule NervesMCP.Connection.SSH do
 
   # ssh can sit for minutes on a name that won't resolve, and on macOS an mDNS
   # name that has gone quiet does exactly that. Give up on a silent attempt and
-  # try the other host.
+  # retry with backoff, so a name that comes back after a reboot is picked up.
   def handle_info({:connect_deadline, port}, %{port: port, data_seen?: false} = state) do
     Logger.warning("No response from the device within the connect deadline, reconnecting")
 
     Port.close(state.port)
 
-    new_state = %{
-      state
-      | port: nil,
-        retry_delay: next_retry_delay(state.retry_delay),
-        fallback?: next_host(state)
-    }
+    new_state = %{state | port: nil, retry_delay: next_retry_delay(state.retry_delay)}
 
     schedule_reconnect(new_state)
     {:noreply, new_state}
@@ -359,12 +332,7 @@ defmodule NervesMCP.Connection.SSH do
       send(pid, {:console_data, "\r\n--- SSH connection lost, reconnecting... ---\r\n"})
     end
 
-    new_state = %{
-      state
-      | port: nil,
-        retry_delay: next_retry_delay(state.retry_delay),
-        fallback?: next_host(state)
-    }
+    new_state = %{state | port: nil, retry_delay: next_retry_delay(state.retry_delay)}
 
     schedule_reconnect(new_state)
     {:noreply, new_state}
