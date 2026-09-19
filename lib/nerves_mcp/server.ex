@@ -23,7 +23,8 @@ defmodule NervesMCP.Server do
     Tools.IsDeviceUpdatedTo,
     Tools.DeviceStatus,
     Tools.DeviceOutput,
-    Tools.GrepDmesg
+    Tools.GrepDmesg,
+    Tools.SetDeviceAddress
   ]
 
   @instructions """
@@ -34,6 +35,10 @@ defmodule NervesMCP.Server do
   device: while the device is down they return a "Device is down" error, so use
   `is_device_up` / `is_device_updated_to` to wait for it to come back after a
   reboot or firmware update, then retry.
+
+  Over SSH, when the device's name has stopped resolving and there is no usable
+  address for it, that error says so. Ask the user for the device's IP address
+  and pass it to `set_device_address`.
 
   `device_output` reads what the device printed into the session, which is the
   only way to see output from a process spawned by an earlier `device_eval`.

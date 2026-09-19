@@ -6,7 +6,8 @@ defmodule NervesMCP.Tools.Device do
   needs the device comes through here and gets the same error while the probe
   reports `:down` or `:unknown`. A client that lost the device after a reboot
   sees the error and can call `is_device_up`, instead of watching the tool
-  disappear from a list it may never refetch.
+  disappear from a list it may never refetch. When the SSH connection knows why
+  it can't reach the device, the error says that instead.
   """
 
   alias NervesMCP.Connection.SSH
@@ -35,11 +36,37 @@ defmodule NervesMCP.Tools.Device do
     mode = DeviceProbe.mode()
 
     if mode in @down_modes do
-      {:error, "Device is down (mode: #{mode}). Call is_device_up to wait for it."}
+      {:error, "Device is down (mode: #{mode}). " <> next_step(connection_status())}
     else
       :ok
     end
   end
+
+  @doc "Give the SSH connection an address for a device name that won't resolve."
+  @spec set_address(String.t()) :: result()
+  def set_address(address) do
+    case connection() do
+      {:ok, SSH} -> SSH.set_address(address)
+      {:ok, UART} -> {:error, "set_device_address only applies to an SSH connection"}
+      error -> error
+    end
+  catch
+    :exit, reason -> {:error, "Device connection error: #{inspect(reason)}"}
+  end
+
+  @doc "The SSH connection's status, or `nil` when there is no SSH connection."
+  @spec connection_status() :: SSH.status() | nil
+  def connection_status() do
+    case connection() do
+      {:ok, SSH} -> SSH.status()
+      _uart_or_unknown -> nil
+    end
+  catch
+    :exit, _reason -> nil
+  end
+
+  defp next_step(%{reason: reason}) when is_binary(reason), do: reason
+  defp next_step(_nothing_to_add), do: "Call is_device_up to wait for it."
 
   defp run(fun, args) do
     with :ok <- ensure_up(),

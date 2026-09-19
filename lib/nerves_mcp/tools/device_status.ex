@@ -9,6 +9,8 @@ defmodule NervesMCP.Tools.DeviceStatus do
 
   @behaviour EMCP.Tool
 
+  alias NervesMCP.Tools.Device
+
   @impl EMCP.Tool
   def name(), do: "device_status"
 
@@ -46,8 +48,20 @@ defmodule NervesMCP.Tools.DeviceStatus do
     Last probe: #{last_probe(status.last_probe_ms_ago)}
     """
 
+    text = text <> connection(Device.connection_status())
+
     EMCP.Tool.response([%{"type" => "text", "text" => String.trim_trailing(text)}])
   end
+
+  defp connection(nil), do: ""
+
+  defp connection(status) do
+    "SSH target: #{status.target}\n" <>
+      line("Known address", status.address) <> line("Reason", status.reason)
+  end
+
+  defp line(_label, nil), do: ""
+  defp line(label, value), do: "#{label}: #{value}\n"
 
   defp offered(mode) do
     names =

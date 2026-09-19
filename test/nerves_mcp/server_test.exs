@@ -17,7 +17,8 @@ defmodule NervesMCP.ServerTest do
         "grep_dmesg",
         "grep_ring_logger",
         "is_device_up",
-        "is_device_updated_to"
+        "is_device_updated_to",
+        "set_device_address"
       ])
 
     for mode <- @elixir_modes do
@@ -37,7 +38,8 @@ defmodule NervesMCP.ServerTest do
                "device_status",
                "grep_dmesg",
                "is_device_up",
-               "is_device_updated_to"
+               "is_device_updated_to",
+               "set_device_address"
              ])
   end
 

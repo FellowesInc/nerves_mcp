@@ -159,7 +159,11 @@ Same poll as `is_device_up`, but against an `expected_uuid`. Errors if the devic
 
 ### device_status
 
-Reports what the probe currently detects on the other end of the connection (`nerves`, `elixir`, `shell`, `down` or `unknown`), and which tools that state offers. Pass `refresh: true` to probe now instead of reading the cached result.
+Reports what the probe currently detects on the other end of the connection (`nerves`, `elixir`, `shell`, `down` or `unknown`), and which tools that state offers. Pass `refresh: true` to probe now instead of reading the cached result. Over SSH it also shows what the connection is trying, the device's cached address, and why it can't reach the device when there is something to do about it.
+
+### set_device_address
+
+Gives the SSH connection an IP `address` for a device whose name won't resolve. The address has to pass the hostname check below before anything runs on it, and is then cached. The configured name stays primary.
 
 ### When the device is down
 
@@ -167,6 +171,36 @@ The tool list doesn't shrink. Tools that need a live device stay listed and
 return an error pointing the caller at `is_device_up`, so a client that fetched
 the list before a reboot doesn't lose the tools it needs to wait for the device
 to come back.
+
+## Learned device address
+
+After a reboot a device's mDNS name, e.g. `nerves-1234.local`, can stay
+unresolvable for minutes while its IP already answers. So over SSH:
+
+1. **Learned while mDNS works.** Each time the name answers, the address it
+   resolves to on this machine is cached under the device's hostname, the first
+   label of the name (`nerves-1234`).
+2. **Used and verified after a reboot.** When the name stops answering,
+   attempts alternate between the name and the cached address, backing off as
+   usual. A connection on the address runs nothing until the device reports its
+   hostname. A match is used. Anything else means DHCP gave the address to
+   another device, so the connection closes and the address is dropped.
+3. **Asks when there's nothing.** With no usable address, the down error,
+   `is_device_up`'s timeout and `device_status` say so and tell the agent to ask
+   the user for the device's IP and call `set_device_address`.
+
+A host given as an IP address learns and checks nothing.
+
+The cache is per developer, since the addresses belong to the developer's
+network. It lives in the user cache directory,
+`~/Library/Caches/nerves_mcp/addresses.term` on macOS and
+`~/.cache/nerves_mcp/addresses.term` on Linux, one
+`{<<"hostname">>, <<"address">>}.` term per line. Deleting it is safe. To put
+it somewhere else:
+
+```elixir
+config :nerves_mcp, :address_cache_dir, "/path/to/dir"
+```
 
 ## Interactive Console
 
