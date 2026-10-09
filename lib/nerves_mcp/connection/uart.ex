@@ -10,6 +10,7 @@ defmodule NervesMCP.Connection.UART do
 
   alias NervesMCP.Connection.EvalTemplate
   alias NervesMCP.Connection.EvalTemplate.Matcher
+  alias NervesMCP.Devices
 
   require Logger
 
@@ -21,30 +22,47 @@ defmodule NervesMCP.Connection.UART do
   @type result() :: {:ok, String.t()} | {:error, String.t()}
 
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(opts) do
+    device = Keyword.fetch!(opts, :device)
+    connection = Keyword.fetch!(opts, :connection)
+
+    GenServer.start_link(__MODULE__, opts,
+      name: Devices.connection_via(device, __MODULE__, connection)
+    )
   end
 
-  @spec eval(String.t(), non_neg_integer()) :: result()
-  def eval(code, timeout \\ 15000) do
-    GenServer.call(__MODULE__, {:eval, code, timeout}, timeout + 1000)
+  @spec eval(Devices.name(), String.t(), non_neg_integer()) :: result()
+  def eval(device, code, timeout \\ 15000) do
+    GenServer.call(Devices.via(device, :connection), {:eval, code, timeout}, timeout + 1000)
   end
 
-  @spec eval_output(String.t(), non_neg_integer()) :: result()
-  def eval_output(code, timeout \\ 15000) do
-    GenServer.call(__MODULE__, {:eval_output, code, timeout}, timeout + 1000)
+  @spec eval_output(Devices.name(), String.t(), non_neg_integer()) :: result()
+  def eval_output(device, code, timeout \\ 15000) do
+    GenServer.call(
+      Devices.via(device, :connection),
+      {:eval_output, code, timeout},
+      timeout + 1000
+    )
   end
 
   @doc "Run a raw shell command (no Elixir wrapping). Used in degraded shell mode."
-  @spec shell_eval(String.t(), non_neg_integer()) :: result()
-  def shell_eval(command, timeout \\ 15000) do
-    GenServer.call(__MODULE__, {:shell_eval, command, timeout}, timeout + 1000)
+  @spec shell_eval(Devices.name(), String.t(), non_neg_integer()) :: result()
+  def shell_eval(device, command, timeout \\ 15000) do
+    GenServer.call(
+      Devices.via(device, :connection),
+      {:shell_eval, command, timeout},
+      timeout + 1000
+    )
   end
 
   @doc "Run a raw shell command and capture stdout/stderr plus exit code."
-  @spec shell_eval_output(String.t(), non_neg_integer()) :: result()
-  def shell_eval_output(command, timeout \\ 15000) do
-    GenServer.call(__MODULE__, {:shell_eval_output, command, timeout}, timeout + 1000)
+  @spec shell_eval_output(Devices.name(), String.t(), non_neg_integer()) :: result()
+  def shell_eval_output(device, command, timeout \\ 15000) do
+    GenServer.call(
+      Devices.via(device, :connection),
+      {:shell_eval_output, command, timeout},
+      timeout + 1000
+    )
   end
 
   @doc """
@@ -55,29 +73,34 @@ defmodule NervesMCP.Connection.UART do
     * `:down`         — not connected / nothing came back
     * `:busy`         — an evaluation is already in flight
   """
-  @spec probe(non_neg_integer()) :: {:ok, String.t()} | :noise | :down | :busy
-  def probe(timeout \\ 4_000) do
-    GenServer.call(__MODULE__, {:probe, timeout}, timeout + 1000)
+  @spec probe(Devices.name(), non_neg_integer()) :: {:ok, String.t()} | :noise | :down | :busy
+  def probe(device, timeout \\ 4_000) do
+    GenServer.call(Devices.via(device, :connection), {:probe, timeout}, timeout + 1000)
   end
 
-  @spec attach_console(pid()) :: :ok
-  def attach_console(pid \\ self()) do
-    GenServer.call(__MODULE__, {:attach_console, pid})
+  @spec attach_console(Devices.name(), pid()) :: :ok
+  def attach_console(device, pid \\ self()) do
+    GenServer.call(Devices.via(device, :connection), {:attach_console, pid})
   end
 
-  @spec detach_console() :: :ok
-  def detach_console() do
-    GenServer.call(__MODULE__, :detach_console)
+  @spec detach_console(Devices.name()) :: :ok
+  def detach_console(device) do
+    GenServer.call(Devices.via(device, :connection), :detach_console)
   end
 
-  @spec send_raw(iodata()) :: :ok
-  def send_raw(data) do
-    GenServer.cast(__MODULE__, {:send_raw, data})
+  @spec send_raw(Devices.name(), iodata()) :: :ok
+  def send_raw(device, data) do
+    GenServer.cast(Devices.via(device, :connection), {:send_raw, data})
   end
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
+    device = Keyword.fetch!(opts, :device)
+    Logger.metadata(device: device)
+
     state = %{
+      device: device,
+      config: Keyword.fetch!(opts, :connection),
       uart: nil,
       connected: false,
       waiting: nil,
@@ -89,7 +112,7 @@ defmodule NervesMCP.Connection.UART do
   end
 
   defp connect(state) do
-    config = Application.get_env(:nerves_mcp, :connection, [])
+    config = state.config
 
     port = Keyword.get(config, :port, @default_port)
     speed = Keyword.get(config, :speed, @default_speed)
@@ -247,7 +270,7 @@ defmodule NervesMCP.Connection.UART do
   end
 
   def handle_info({:circuits_uart, _port, data}, state) do
-    NervesMCP.History.push(data)
+    NervesMCP.History.push(state.device, data)
 
     case state.waiting do
       nil ->

@@ -13,12 +13,19 @@ defmodule NervesMCP.Server do
   a serial that does not run Elixir has no `device_eval` and no RingLogger. It
   swaps in the raw shell eval tools and drops `grep_ring_logger`. `grep_dmesg`
   stays, since it only needs `dmesg` and runs it through the shell instead.
+
+  The list is for every configured device at once, and the two lists share tool
+  names, so it is the shell list only when every device is in `:shell`. A shell
+  device among Elixir ones gets the Elixir tools, which fail on it, and
+  `device_status` says why.
   """
 
   alias NervesMCP.DeviceProbe
+  alias NervesMCP.Devices
   alias NervesMCP.Tools
 
   @base [
+    Tools.ListDevices,
     Tools.IsDeviceUp,
     Tools.IsDeviceUpdatedTo,
     Tools.DeviceStatus,
@@ -28,7 +35,10 @@ defmodule NervesMCP.Server do
   ]
 
   @instructions """
-  Tools for interacting with a connected Nerves device over serial or SSH.
+  Tools for interacting with connected Nerves devices over serial or SSH.
+
+  Every device tool takes a `device` name. It can be left out when only one
+  device is configured, and `list_devices` lists the names.
 
   `device_eval`/`device_eval_output` evaluate Elixir on the device,
   `grep_ring_logger` and `grep_dmesg` filter its logs. All of them need a live
@@ -43,23 +53,36 @@ defmodule NervesMCP.Server do
   `device_output` reads what the device printed into the session, which is the
   only way to see output from a process spawned by an earlier `device_eval`.
 
-  On a serial that responds but does not run Elixir, `device_eval` and
-  `device_eval_output` take a raw shell command instead, `grep_dmesg` shells out
-  to `dmesg`, and `grep_ring_logger` is not listed at all. `device_status`
-  reports which mode is in force.
+  When every device is a serial that responds but does not run Elixir,
+  `device_eval` and `device_eval_output` take a raw shell command instead,
+  `grep_dmesg` shells out to `dmesg`, and `grep_ring_logger` is not listed at
+  all. With several devices where some do run Elixir, the Elixir tools are
+  listed, and they don't work on a shell device. `device_status` reports each
+  device's mode and which tools apply to it.
   """
 
   @spec server() :: struct()
   def server() do
-    DeviceProbe.touch()
+    devices = Devices.names()
 
     EMCP.Server.new(
       name: "nerves-mcp",
       version: "0.1.0",
-      instructions: @instructions,
-      tools: tools_for(DeviceProbe.mode())
+      instructions: @instructions <> configured(devices),
+      tools: devices |> Enum.map(&DeviceProbe.mode/1) |> tools_for_all()
     )
   end
+
+  defp configured([]), do: ""
+  defp configured(devices), do: "\nConfigured devices: #{Enum.join(devices, ", ")}.\n"
+
+  @doc "The tools listed for every configured device's probed mode."
+  @spec tools_for_all([DeviceProbe.mode()]) :: [module()]
+  def tools_for_all([_ | _] = modes) do
+    if Enum.all?(modes, &(&1 == :shell)), do: tools_for(:shell), else: tools_for(:nerves)
+  end
+
+  def tools_for_all([]), do: tools_for(:unknown)
 
   @doc "The tools listed for a probed mode."
   @spec tools_for(DeviceProbe.mode()) :: [module()]

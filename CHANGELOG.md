@@ -7,6 +7,18 @@ All notable changes to this fork are documented here. The format follows
 
 ### Added
 
+- Several devices on one server. Each `--device NAME=TARGET` names a device,
+  once per device, and `config :nerves_mcp, :devices` takes a list of
+  `{name, connection}`. Every device tool takes a `device` argument, which can
+  be left out when only one device is configured, and `list_devices` lists the
+  names with each device's connection and mode. Each device runs its own
+  connection, probe and output history under a supervisor of its own,
+  registered by name in a `Registry`, so one device dropping off leaves the
+  others alone. A single device given the old way runs as the device `default`
+  and needs no `device` argument. Devices are checked before anything starts, so
+  a duplicate name or a missing `:type`, `:host` or `:port` fails with a message
+  that names the device. Every log line from a device's processes carries
+  `device=<name>`.
 - A learned device address for SSH. While the device's name answers, the
   address it resolves to is cached per developer under the user cache
   directory. When the name stops resolving after a reboot, the connection
@@ -51,6 +63,9 @@ All notable changes to this fork are documented here. The format follows
 
 ### Fixed
 
+- `--user`, `--ssh-port` and `--pass` only apply to SSH connections, and
+  `--speed` only to serial. `--ssh-port` used to overwrite a serial
+  connection's `:port`, which is its device path.
 - `mix nerves_mcp` no longer ignores its own arguments when
   `config/config.exs` names a `:connection`. `app.start` ran first and brought
   up Bandit and the connection on the config port and host, then the CLI started

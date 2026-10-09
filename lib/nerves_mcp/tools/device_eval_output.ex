@@ -24,6 +24,7 @@ defmodule NervesMCP.Tools.DeviceEvalOutput do
     %{
       type: :object,
       properties: %{
+        device: Device.schema(),
         code: %{type: :string, description: "Elixir code to evaluate on the device"},
         timeout: %{type: :integer, description: "Timeout in milliseconds (default: 15000)"}
       },
@@ -33,15 +34,17 @@ defmodule NervesMCP.Tools.DeviceEvalOutput do
 
   @impl EMCP.Tool
   def call(_conn, args) do
-    code = args["code"]
-    timeout = args["timeout"] || 15000
+    Device.with_device(args, fn device ->
+      code = args["code"]
+      timeout = args["timeout"] || 15000
 
-    case Device.eval_output(code, timeout) do
-      {:ok, output} ->
-        EMCP.Tool.response([%{"type" => "text", "text" => output}])
+      case Device.eval_output(device, code, timeout) do
+        {:ok, output} ->
+          EMCP.Tool.response([%{"type" => "text", "text" => output}])
 
-      {:error, reason} ->
-        EMCP.Tool.error(reason)
-    end
+        {:error, reason} ->
+          EMCP.Tool.error(reason)
+      end
+    end)
   end
 end

@@ -28,6 +28,7 @@ defmodule NervesMCP.Tools.GrepDmesg do
     %{
       type: :object,
       properties: %{
+        device: Device.schema(),
         pattern: %{
           type: :string,
           description: "Substring (or regex if `regex` is true) to match dmesg lines against"
@@ -51,21 +52,23 @@ defmodule NervesMCP.Tools.GrepDmesg do
 
   @impl EMCP.Tool
   def call(_conn, args) do
-    pattern = args["pattern"]
-    regex? = args["regex"] || false
-    tail = args["tail"]
-    timeout = args["timeout"] || 15_000
+    Device.with_device(args, fn device ->
+      pattern = args["pattern"]
+      regex? = args["regex"] || false
+      tail = args["tail"]
+      timeout = args["timeout"] || 15_000
 
-    result =
-      case request(DeviceProbe.mode(), pattern, regex?, tail) do
-        {:eval_output, code} -> Device.eval_output(code, timeout)
-        {:shell_eval_output, command} -> Device.shell_eval_output(command, timeout)
+      result =
+        case request(DeviceProbe.mode(device), pattern, regex?, tail) do
+          {:eval_output, code} -> Device.eval_output(device, code, timeout)
+          {:shell_eval_output, command} -> Device.shell_eval_output(device, command, timeout)
+        end
+
+      case result do
+        {:ok, output} -> EMCP.Tool.response([%{"type" => "text", "text" => output}])
+        {:error, reason} -> EMCP.Tool.error(reason)
       end
-
-    case result do
-      {:ok, output} -> EMCP.Tool.response([%{"type" => "text", "text" => output}])
-      {:error, reason} -> EMCP.Tool.error(reason)
-    end
+    end)
   end
 
   @doc """

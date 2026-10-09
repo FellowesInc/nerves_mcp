@@ -29,16 +29,18 @@ defmodule NervesMCP.Connection.AddressCache do
 
   @spec put(Path.t(), String.t(), String.t()) :: :ok
   def put(path, hostname, address) do
-    path |> read() |> Map.put(hostname, address) |> write(path)
+    serialized(path, fn -> path |> read() |> Map.put(hostname, address) |> write(path) end)
   end
 
   @doc "Drop `hostname`'s entry, but only while it still points at `address`."
   @spec delete(Path.t(), String.t(), String.t()) :: :ok
   def delete(path, hostname, address) do
-    case read(path) do
-      %{^hostname => ^address} = entries -> entries |> Map.delete(hostname) |> write(path)
-      _other_or_none -> :ok
-    end
+    serialized(path, fn ->
+      case read(path) do
+        %{^hostname => ^address} = entries -> entries |> Map.delete(hostname) |> write(path)
+        _other_or_none -> :ok
+      end
+    end)
   end
 
   @doc """
@@ -58,6 +60,10 @@ defmodule NervesMCP.Connection.AddressCache do
 
     :ok
   end
+
+  # Every device's connection shares the file, and each update reads it, changes one entry and
+  # writes it back. Run concurrently, the last writer would drop the others' entries.
+  defp serialized(path, fun), do: :global.trans({{__MODULE__, path}, self()}, fun, [node()])
 
   defp read(path) do
     case :file.consult(path) do

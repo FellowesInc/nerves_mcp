@@ -28,6 +28,7 @@ defmodule NervesMCP.Tools.SetDeviceAddress do
     %{
       type: :object,
       properties: %{
+        device: Device.schema(),
         address: %{type: :string, description: "The device's IP address, e.g. 192.0.2.10"}
       },
       required: [:address]
@@ -35,16 +36,18 @@ defmodule NervesMCP.Tools.SetDeviceAddress do
   end
 
   @impl EMCP.Tool
-  def call(_conn, %{"address" => address}) do
-    case Device.set_address(address) do
-      {:ok, text} ->
-        # The probe still holds the down mode from before there was an address,
-        # so without this the next device tool call is refused until its tick.
-        DeviceProbe.refresh()
-        EMCP.Tool.response([%{"type" => "text", "text" => text}])
+  def call(_conn, %{"address" => address} = args) do
+    Device.with_device(args, fn device ->
+      case Device.set_address(device, address) do
+        {:ok, text} ->
+          # The probe still holds the down mode from before there was an address,
+          # so without this the next device tool call is refused until its tick.
+          DeviceProbe.refresh(device)
+          EMCP.Tool.response([%{"type" => "text", "text" => text}])
 
-      {:error, reason} ->
-        EMCP.Tool.error(reason)
-    end
+        {:error, reason} ->
+          EMCP.Tool.error(reason)
+      end
+    end)
   end
 end

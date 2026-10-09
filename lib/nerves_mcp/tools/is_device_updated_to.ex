@@ -11,8 +11,7 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedTo do
 
   @behaviour EMCP.Tool
 
-  alias NervesMCP.Connection.SSH
-  alias NervesMCP.Connection.UART
+  alias NervesMCP.Tools.Device
 
   @eval_timeout 5_000
   @retry_pause 2_000
@@ -29,6 +28,7 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedTo do
     %{
       type: :object,
       properties: %{
+        device: Device.schema(),
         expected_uuid: %{
           type: :string,
           description: "The firmware UUID expected after the update"
@@ -44,28 +44,27 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedTo do
 
   @impl EMCP.Tool
   def call(_conn, args) do
-    expected_uuid = args["expected_uuid"]
-    total_timeout = args["timeout"] || 60_000
-    deadline = System.monotonic_time(:millisecond) + total_timeout
+    Device.with_device(args, fn device ->
+      expected_uuid = args["expected_uuid"]
+      total_timeout = args["timeout"] || 60_000
+      deadline = System.monotonic_time(:millisecond) + total_timeout
 
-    config = Application.get_env(:nerves_mcp, :connection, [])
-    connection_type = Keyword.get(config, :type, :uart)
+      case poll_device(device, expected_uuid, deadline) do
+        :ok ->
+          EMCP.Tool.response([
+            %{
+              "type" => "text",
+              "text" => "Device is up and running expected firmware UUID: #{expected_uuid}"
+            }
+          ])
 
-    case poll_device(connection_type, expected_uuid, deadline) do
-      :ok ->
-        EMCP.Tool.response([
-          %{
-            "type" => "text",
-            "text" => "Device is up and running expected firmware UUID: #{expected_uuid}"
-          }
-        ])
-
-      {:error, reason} ->
-        EMCP.Tool.error(reason)
-    end
+        {:error, reason} ->
+          EMCP.Tool.error(reason)
+      end
+    end)
   end
 
-  defp poll_device(connection_type, expected_uuid, deadline) do
+  defp poll_device(device, expected_uuid, deadline) do
     remaining = deadline - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
@@ -73,18 +72,18 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedTo do
     else
       eval_timeout = min(@eval_timeout, remaining)
 
-      case try_eval(connection_type, eval_timeout) do
+      case try_eval(device, eval_timeout) do
         {:ok, raw_uuid} when raw_uuid != "" ->
           # The device answered, so the probe's cached mode is stale. Without
           # this it stays :down and the device tools keep refusing calls. This
           # poll read what a probe reads, so hand the answer over rather than
           # making it go and look again.
-          NervesMCP.DeviceProbe.record_eval(raw_uuid)
+          NervesMCP.DeviceProbe.record_eval(device, raw_uuid)
           compare_uuid(raw_uuid, expected_uuid)
 
         _ ->
           Process.sleep(min(@retry_pause, max(0, deadline - System.monotonic_time(:millisecond))))
-          poll_device(connection_type, expected_uuid, deadline)
+          poll_device(device, expected_uuid, deadline)
       end
     end
   end
@@ -100,17 +99,7 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedTo do
     end
   end
 
-  defp try_eval(connection_type, timeout) do
-    code = ~s|Nerves.Runtime.KV.get_active("nerves_fw_uuid")|
-
-    try do
-      case connection_type do
-        :uart -> UART.eval(code, timeout)
-        :ssh -> SSH.eval(code, timeout)
-        other -> {:error, "Unknown connection type: #{inspect(other)}"}
-      end
-    catch
-      :exit, _ -> {:error, "connection unavailable"}
-    end
+  defp try_eval(device, timeout) do
+    Device.eval_unchecked(device, ~s|Nerves.Runtime.KV.get_active("nerves_fw_uuid")|, timeout)
   end
 end

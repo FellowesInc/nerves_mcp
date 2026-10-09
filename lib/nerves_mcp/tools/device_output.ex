@@ -14,6 +14,7 @@ defmodule NervesMCP.Tools.DeviceOutput do
   @behaviour EMCP.Tool
 
   alias NervesMCP.History
+  alias NervesMCP.Tools.Device
 
   @impl EMCP.Tool
   def name(), do: "device_output"
@@ -28,6 +29,7 @@ defmodule NervesMCP.Tools.DeviceOutput do
     %{
       type: :object,
       properties: %{
+        device: Device.schema(),
         cursor: %{
           type: :integer,
           description:
@@ -40,17 +42,19 @@ defmodule NervesMCP.Tools.DeviceOutput do
 
   @impl EMCP.Tool
   def call(_conn, args) do
-    case read(args["cursor"]) do
-      {:ok, output, cursor} ->
-        EMCP.Tool.response([%{"type" => "text", "text" => text(output, cursor)}])
+    Device.with_device(args, fn device ->
+      case read(device, args["cursor"]) do
+        {:ok, output, cursor} ->
+          EMCP.Tool.response([%{"type" => "text", "text" => text(output, cursor)}])
 
-      {:error, reason} ->
-        EMCP.Tool.error(reason)
-    end
+        {:error, reason} ->
+          EMCP.Tool.error(reason)
+      end
+    end)
   end
 
-  defp read(cursor) do
-    {output, next_cursor} = History.since(cursor)
+  defp read(device, cursor) do
+    {output, next_cursor} = History.since(device, cursor)
     {:ok, output, next_cursor}
   catch
     :exit, {:noproc, _} -> {:error, "Device output history is not running"}
