@@ -7,12 +7,12 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedToTest do
   alias NervesMCP.Tools.IsDeviceUpdatedTo
 
   setup do
-    start_supervised!(History)
+    start_supervised!({History, device: "default"})
     daemon = SSHDaemon.start()
     on_exit(fn -> SSHDaemon.stop(daemon) end)
 
     SSHDaemon.connect(daemon)
-    start_supervised!(DeviceProbe)
+    start_supervised!({DeviceProbe, device: "default"})
 
     :ok
   end
@@ -22,8 +22,8 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedToTest do
   # A second probe here would spend another 4 s past the caller's deadline and
   # could contradict the poll that just succeeded.
   test "a poll that answers updates the mode without a second probe" do
-    assert DeviceProbe.mode() == :unknown
-    History.clear()
+    assert DeviceProbe.mode("default") == :unknown
+    History.clear("default")
 
     assert %{"isError" => true} =
              IsDeviceUpdatedTo.call(nil, %{
@@ -31,8 +31,8 @@ defmodule NervesMCP.Tools.IsDeviceUpdatedToTest do
                "timeout" => 5_000
              })
 
-    assert DeviceProbe.mode() == :elixir
-    assert evals(History.get()) == 1
+    assert DeviceProbe.mode("default") == :elixir
+    assert evals(History.get("default")) == 1
   end
 
   # Each eval and each probe carries its own marker, so counting the distinct

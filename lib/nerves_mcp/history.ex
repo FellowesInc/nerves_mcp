@@ -1,6 +1,6 @@
 defmodule NervesMCP.History do
   @moduledoc """
-  Stores recent device output in a circular buffer.
+  Stores recent device output in a circular buffer, one per device.
 
   Everything the session prints lands here, including output from processes
   spawned on the device, which never reaches the caller of `device_eval`.
@@ -19,6 +19,8 @@ defmodule NervesMCP.History do
 
   use Agent
 
+  alias NervesMCP.Devices
+
   @default_size 10_000
 
   # The eval wrapper's markers, as Connection.SSH generates them.
@@ -33,21 +35,22 @@ defmodule NervesMCP.History do
   @initial_state %{kept: [], fencing: nil, echoing: false, returning: nil}
 
   @spec start_link(keyword()) :: Agent.on_start()
-  def start_link(opts \\ []) do
+  def start_link(opts) do
+    device = Keyword.fetch!(opts, :device)
     size = Keyword.get(opts, :size, @default_size)
-    Agent.start_link(fn -> CircularBuffer.new(size) end, name: __MODULE__)
+    Agent.start_link(fn -> CircularBuffer.new(size) end, name: Devices.via(device, __MODULE__))
   end
 
-  @spec push(binary()) :: :ok
-  def push(data) when is_binary(data) do
-    Agent.update(__MODULE__, fn buffer ->
+  @spec push(Devices.name(), binary()) :: :ok
+  def push(device, data) when is_binary(data) do
+    Agent.update(Devices.via(device, __MODULE__), fn buffer ->
       CircularBuffer.insert(buffer, {System.monotonic_time(), data})
     end)
   end
 
-  @spec get() :: String.t()
-  def get() do
-    Agent.get(__MODULE__, fn buffer ->
+  @spec get(Devices.name()) :: String.t()
+  def get(device) do
+    Agent.get(Devices.via(device, __MODULE__), fn buffer ->
       buffer
       |> CircularBuffer.to_list()
       |> Enum.map_join(fn {_ts, data} -> data end)
@@ -60,17 +63,17 @@ defmodule NervesMCP.History do
   `nil` reads everything still in the buffer. The cursor is a monotonic
   timestamp, so it is only meaningful to this server process.
   """
-  @spec since(integer() | nil) :: {String.t(), integer()}
-  def since(cursor \\ nil) do
-    entries = Agent.get(__MODULE__, &CircularBuffer.to_list/1)
+  @spec since(Devices.name(), integer() | nil) :: {String.t(), integer()}
+  def since(device, cursor \\ nil) do
+    entries = Agent.get(Devices.via(device, __MODULE__), &CircularBuffer.to_list/1)
     {fresh, stale} = Enum.split_with(entries, &fresher?(&1, cursor))
 
     {device_output(join(stale), join(fresh)), next_cursor(fresh, entries, cursor)}
   end
 
-  @spec clear() :: :ok
-  def clear() do
-    Agent.update(__MODULE__, fn buffer ->
+  @spec clear(Devices.name()) :: :ok
+  def clear(device) do
+    Agent.update(Devices.via(device, __MODULE__), fn buffer ->
       CircularBuffer.new(buffer.max_size)
     end)
   end

@@ -8,7 +8,7 @@ defmodule NervesMCP.Connection.SSHConnectDeadlineTest do
   @moduletag timeout: 60_000
 
   setup do
-    start_supervised!(NervesMCP.History)
+    start_supervised!({NervesMCP.History, device: "default"})
     on_exit(fn -> Application.delete_env(:nerves_mcp, :connection) end)
     :ok
   end
@@ -55,7 +55,7 @@ defmodule NervesMCP.Connection.SSHConnectDeadlineTest do
   end
 
   defp run_for(duration) do
-    pid = start_supervised!(SSH)
+    pid = start_supervised!({SSH, device: "default"})
     Process.sleep(duration)
     stop_supervised!(SSH)
     refute Process.alive?(pid)

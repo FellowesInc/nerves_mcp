@@ -20,7 +20,7 @@ defmodule NervesMCP.Connection.SSHAddressTest do
   @moduletag timeout: 60_000
 
   setup %{tmp_dir: dir} do
-    start_supervised!(NervesMCP.History)
+    start_supervised!({NervesMCP.History, device: "default"})
     daemon = SSHDaemon.start()
     on_exit(fn -> SSHDaemon.stop(daemon) end)
 
@@ -53,17 +53,19 @@ defmodule NervesMCP.Connection.SSHAddressTest do
 
     assert log =~ "Trying address 127.0.0.1 for #{ctx.hostname}.invalid"
     assert log =~ "Verified 127.0.0.1 is #{ctx.hostname}.invalid"
-    assert %{target: "127.0.0.1", address: "127.0.0.1", reason: nil} = SSH.status()
+    assert %{target: "127.0.0.1", address: "127.0.0.1", reason: nil} = SSH.status("default")
   end
 
   test "a cached address that answers as another device is dropped and never evaluates", ctx do
     AddressCache.put(ctx.cache, "nerves-1234", "127.0.0.1")
     start_ssh("nerves-1234.invalid", ctx.daemon)
-    start_supervised!(DeviceProbe)
+    start_supervised!({DeviceProbe, device: "default"})
 
     assert eventually(fn ->
-             refute match?({:ok, _}, SSH.eval("1 + 1", 500))
-             SSH.status().reason != nil and String.contains?(SSH.status().reason, "answered")
+             refute match?({:ok, _}, SSH.eval("default", "1 + 1", 500))
+
+             SSH.status("default").reason != nil and
+               String.contains?(SSH.status("default").reason, "answered")
            end)
 
     assert AddressCache.lookup(ctx.cache, "nerves-1234") == nil
@@ -73,10 +75,10 @@ defmodule NervesMCP.Connection.SSHAddressTest do
         "another device, so it is no longer used. Ask the user for the device's IP " <>
         "address, then call set_device_address."
 
-    assert SSH.status().reason == reason
+    assert SSH.status("default").reason == reason
 
-    assert {:down, _detail} = DeviceProbe.refresh()
-    assert Device.ensure_up() == {:error, "Device is down (mode: down). " <> reason}
+    assert {:down, _detail} = DeviceProbe.refresh("default")
+    assert Device.ensure_up("default") == {:error, "Device is down (mode: down). " <> reason}
   end
 
   # The shell prints a line and then swallows everything, so the address answers
@@ -105,8 +107,8 @@ defmodule NervesMCP.Connection.SSHAddressTest do
         start_ssh(host, daemon)
 
         checking = {:error, "Device not connected (checking 127.0.0.1 is #{host})"}
-        assert eventually(fn -> SSH.eval("1 + 1", 500) == checking end)
-        assert eventually(fn -> SSH.status().reason == reason end)
+        assert eventually(fn -> SSH.eval("default", "1 + 1", 500) == checking end)
+        assert eventually(fn -> SSH.status("default").reason == reason end)
       end)
 
     assert log =~ "127.0.0.1 never reported its hostname, dropping it"
@@ -114,16 +116,16 @@ defmodule NervesMCP.Connection.SSHAddressTest do
 
   test "no cached address and a name that won't resolve asks for the address", ctx do
     start_ssh("nerves-1234.invalid", ctx.daemon)
-    start_supervised!(DeviceProbe)
+    start_supervised!({DeviceProbe, device: "default"})
 
     reason =
       "nerves-1234.invalid isn't answering and no address is known for this device. " <>
         "Ask the user for the device's IP address, then call set_device_address."
 
-    assert eventually(fn -> SSH.status().reason == reason end)
+    assert eventually(fn -> SSH.status("default").reason == reason end)
 
-    assert {:down, _detail} = DeviceProbe.refresh()
-    assert Device.ensure_up() == {:error, "Device is down (mode: down). " <> reason}
+    assert {:down, _detail} = DeviceProbe.refresh("default")
+    assert Device.ensure_up("default") == {:error, "Device is down (mode: down). " <> reason}
 
     assert %{"content" => [%{"text" => text}], "isError" => true} =
              IsDeviceUp.call(nil, %{"timeout" => 1_000})
@@ -136,9 +138,9 @@ defmodule NervesMCP.Connection.SSHAddressTest do
 
   test "set_device_address connects to an address that checks out and caches it", ctx do
     start_ssh("#{ctx.hostname}.invalid", ctx.daemon)
-    start_supervised!(DeviceProbe)
-    assert eventually(fn -> SSH.status().reason != nil end)
-    assert {:down, _detail} = DeviceProbe.refresh()
+    start_supervised!({DeviceProbe, device: "default"})
+    assert eventually(fn -> SSH.status("default").reason != nil end)
+    assert {:down, _detail} = DeviceProbe.refresh("default")
 
     assert %{"content" => [%{"text" => text}]} =
              SetDeviceAddress.call(nil, %{"address" => "127.0.0.1"})
@@ -147,10 +149,10 @@ defmodule NervesMCP.Connection.SSHAddressTest do
 
     # Found on hardware: "Connected", then the next tool call refused as down
     # until the probe's next tick.
-    assert Device.ensure_up() == :ok
-    assert {:ok, "2" <> _} = SSH.eval("1 + 1", 5_000)
+    assert Device.ensure_up("default") == :ok
+    assert {:ok, "2" <> _} = SSH.eval("default", "1 + 1", 5_000)
     assert AddressCache.lookup(ctx.cache, ctx.hostname) == "127.0.0.1"
-    assert SSH.status().reason == nil
+    assert SSH.status("default").reason == nil
   end
 
   test "set_device_address rejects an address that answers as another device", ctx do
@@ -161,7 +163,7 @@ defmodule NervesMCP.Connection.SSHAddressTest do
 
     assert text =~ "127.0.0.1 answered as #{ctx.hostname}, not nerves-1234."
     assert AddressCache.lookup(ctx.cache, "nerves-1234") == nil
-    refute match?({:ok, _}, SSH.eval("1 + 1", 500))
+    refute match?({:ok, _}, SSH.eval("default", "1 + 1", 500))
 
     assert %{"content" => [%{"text" => "\"nerves-1234\" is not an IP address"}]} =
              SetDeviceAddress.call(nil, %{"address" => "nerves-1234"})
@@ -179,7 +181,7 @@ defmodule NervesMCP.Connection.SSHAddressTest do
              SetDeviceAddress.call(nil, %{"address" => "127.0.0.1"})
 
     assert text =~ "127.0.0.1 is an address already"
-    assert SSH.status().reason == nil
+    assert SSH.status("default").reason == nil
   end
 
   defp start_ssh(host, daemon) do
@@ -190,11 +192,11 @@ defmodule NervesMCP.Connection.SSHAddressTest do
       user: System.get_env("USER", "nobody")
     )
 
-    start_supervised!(SSH)
+    start_supervised!({SSH, device: "default"})
   end
 
   defp evaluates?() do
-    eventually(fn -> match?({:ok, "2" <> _}, SSH.eval("1 + 1", 1_000)) end)
+    eventually(fn -> match?({:ok, "2" <> _}, SSH.eval("default", "1 + 1", 1_000)) end)
   end
 
   defp eventually(fun, tries \\ 60) do

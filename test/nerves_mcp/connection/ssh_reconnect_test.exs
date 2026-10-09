@@ -7,7 +7,7 @@ defmodule NervesMCP.Connection.SSHReconnectTest do
   @moduletag timeout: 120_000
 
   setup do
-    start_supervised!(NervesMCP.History)
+    start_supervised!({NervesMCP.History, device: "default"})
     daemon = SSHDaemon.start()
     on_exit(fn -> File.rm_rf(daemon.system_dir) end)
 
@@ -17,7 +17,7 @@ defmodule NervesMCP.Connection.SSHReconnectTest do
   end
 
   test "the session comes back after the device goes away and returns", %{daemon: daemon} do
-    assert {:ok, "2" <> _} = SSH.eval("1 + 1", 5_000)
+    assert {:ok, "2" <> _} = SSH.eval("default", "1 + 1", 5_000)
 
     :ok = :ssh.stop_daemon(daemon.ref)
 
@@ -46,7 +46,7 @@ defmodule NervesMCP.Connection.SSHReconnectTest do
   defp eventually_disconnected(0), do: false
 
   defp eventually_disconnected(tries) do
-    case SSH.eval("1 + 1", 500) do
+    case SSH.eval("default", "1 + 1", 500) do
       {:ok, "2" <> _} ->
         Process.sleep(100)
         eventually_disconnected(tries - 1)
@@ -59,7 +59,7 @@ defmodule NervesMCP.Connection.SSHReconnectTest do
   defp eventually_evaluates(0), do: false
 
   defp eventually_evaluates(tries) do
-    case SSH.eval("1 + 1", 1_000) do
+    case SSH.eval("default", "1 + 1", 1_000) do
       {:ok, "2" <> _} ->
         true
 

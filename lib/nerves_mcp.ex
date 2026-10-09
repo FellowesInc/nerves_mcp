@@ -31,51 +31,62 @@ defmodule NervesMCP do
         user: "root",
         port: 22
 
+  ### Several devices
+
+      config :nerves_mcp, :devices, [
+        {"board1", type: :ssh, host: "192.0.2.10"},
+        {"board2", type: :ssh, host: "192.0.2.11"}
+      ]
+
+  See `NervesMCP.Devices`.
+
   ## Interactive Console
 
-  Call `NervesMCP.console()` to enter an interactive console session.
+  Call `NervesMCP.console()` to enter an interactive console session, or
+  `NervesMCP.console("board2")` to pick a device when there are several.
   Type `#quit` to exit and return to IEx, or `#history` to view buffered output.
 
   ## Output History
 
   Device output that arrives when no console is attached is stored in a
-  circular buffer. Call `NervesMCP.history()` to view it, or use `#history`
-  in the console.
+  circular buffer per device. Call `NervesMCP.history()` to view it, or use
+  `#history` in the console.
   """
 
+  alias NervesMCP.Devices
+
   @doc """
-  Opens an interactive console to the connected device.
+  Opens an interactive console to a connected device.
 
   Displays all incoming data from the device and allows you to send
   commands directly. Type `#quit` to exit the console and return to IEx.
+  `device` can be left out when only one device is configured.
   """
-  @spec console() :: :ok
-  def console() do
-    config = Application.get_env(:nerves_mcp, :connection, [])
-    connection_type = Keyword.get(config, :type, :uart)
+  @spec console(Devices.name() | nil) :: :ok | {:error, String.t()}
+  def console(device \\ nil) do
+    with {:ok, device} <- Devices.resolve(device),
+         {:ok, module} <- Devices.module(device) do
+      open_console(device, module)
+    end
+  end
 
-    connection_module =
-      case connection_type do
-        :uart -> NervesMCP.Connection.UART
-        :ssh -> NervesMCP.Connection.SSH
-      end
-
+  defp open_console(device, module) do
     # Start a process to receive and display console data
     receiver =
       spawn_link(fn ->
-        monitor_and_attach(connection_module)
-        receive_loop(connection_module)
+        monitor_and_attach(device, module)
+        receive_loop(device, module)
       end)
 
-    IO.puts("Connected to device console. Commands: #quit, #history")
+    IO.puts("Connected to #{device} console. Commands: #quit, #history")
     IO.puts("---")
 
     try do
-      input_loop(connection_module)
+      input_loop(device, module)
     after
       # Clean up: stop receiver and detach console
       send(receiver, :stop)
-      connection_module.detach_console()
+      module.detach_console(device)
     end
 
     IO.puts("---")
@@ -89,10 +100,11 @@ defmodule NervesMCP do
   All device output that arrives when no console is attached is stored
   in a circular buffer. Use this to view what you might have missed.
   """
-  @spec history() :: :ok
-  def history() do
-    IO.puts(NervesMCP.History.get())
-    :ok
+  @spec history(Devices.name() | nil) :: :ok | {:error, String.t()}
+  def history(device \\ nil) do
+    with {:ok, device} <- Devices.resolve(device) do
+      IO.puts(NervesMCP.History.get(device))
+    end
   end
 
   @spec exit() :: no_return()
@@ -101,24 +113,24 @@ defmodule NervesMCP do
     System.halt(0)
   end
 
-  defp monitor_and_attach(connection_module) do
-    pid = wait_for_process(connection_module)
+  defp monitor_and_attach(device, module) do
+    pid = wait_for_process(device, module)
     Process.monitor(pid)
-    connection_module.attach_console(self())
+    module.attach_console(device, self())
   end
 
-  defp wait_for_process(connection_module) do
-    case Process.whereis(connection_module) do
+  defp wait_for_process(device, module) do
+    case GenServer.whereis(Devices.via(device, module)) do
       nil ->
         Process.sleep(200)
-        wait_for_process(connection_module)
+        wait_for_process(device, module)
 
       pid ->
         pid
     end
   end
 
-  defp receive_loop(connection_module, buffer \\ <<>>) do
+  defp receive_loop(device, module, buffer \\ <<>>) do
     receive do
       {:console_data, data} ->
         combined = buffer <> data
@@ -128,13 +140,13 @@ defmodule NervesMCP do
           IO.write(complete)
         end
 
-        receive_loop(connection_module, incomplete)
+        receive_loop(device, module, incomplete)
 
       {:DOWN, _ref, :process, _pid, _reason} ->
         IO.puts("\r\n--- Connection lost, reconnecting... ---")
-        monitor_and_attach(connection_module)
+        monitor_and_attach(device, module)
         IO.puts("--- Reconnected ---")
-        receive_loop(connection_module)
+        receive_loop(device, module)
 
       :stop ->
         # Write any remaining buffer on exit
@@ -202,7 +214,7 @@ defmodule NervesMCP do
 
   defp incomplete_count(_remaining, _sequence_length), do: 0
 
-  defp input_loop(connection_module) do
+  defp input_loop(device, module) do
     case IO.gets("") do
       :eof ->
         :ok
@@ -219,13 +231,13 @@ defmodule NervesMCP do
 
           "#history" ->
             IO.puts("--- History ---")
-            IO.puts(NervesMCP.History.get())
+            IO.puts(NervesMCP.History.get(device))
             IO.puts("--- End History ---")
-            input_loop(connection_module)
+            input_loop(device, module)
 
           _ ->
-            connection_module.send_raw(input)
-            input_loop(connection_module)
+            module.send_raw(device, input)
+            input_loop(device, module)
         end
     end
   end

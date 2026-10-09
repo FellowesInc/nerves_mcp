@@ -26,6 +26,7 @@
     "getaddr",
     "gethostname",
     "hpax",
+    "keyfind",
     "keygen",
     "exnvr",
     "lawik",

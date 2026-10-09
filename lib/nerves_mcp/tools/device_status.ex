@@ -24,6 +24,7 @@ defmodule NervesMCP.Tools.DeviceStatus do
     %{
       type: :object,
       properties: %{
+        device: Device.schema(),
         refresh: %{
           type: :boolean,
           description:
@@ -36,11 +37,16 @@ defmodule NervesMCP.Tools.DeviceStatus do
 
   @impl EMCP.Tool
   def call(_conn, args) do
-    if args["refresh"], do: NervesMCP.DeviceProbe.refresh()
+    Device.with_device(args, &status(&1, args["refresh"]))
+  end
 
-    status = NervesMCP.DeviceProbe.status()
+  defp status(device, refresh?) do
+    if refresh?, do: NervesMCP.DeviceProbe.refresh(device)
+
+    status = NervesMCP.DeviceProbe.status(device)
 
     text = """
+    Device: #{device}
     Detected mode: #{status.mode}
     Detail: #{status.detail}
     Offered tools: #{offered(status.mode)}
@@ -48,7 +54,7 @@ defmodule NervesMCP.Tools.DeviceStatus do
     Last probe: #{last_probe(status.last_probe_ms_ago)}
     """
 
-    text = text <> connection(Device.connection_status())
+    text = text <> connection(Device.connection_status(device))
 
     EMCP.Tool.response([%{"type" => "text", "text" => String.trim_trailing(text)}])
   end

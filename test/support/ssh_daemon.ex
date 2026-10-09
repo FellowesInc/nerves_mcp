@@ -64,7 +64,7 @@ defmodule NervesMCP.Test.SSHDaemon do
       user: System.get_env("USER", "nobody")
     )
 
-    {:ok, pid} = NervesMCP.Connection.SSH.start_link([])
+    {:ok, pid} = NervesMCP.Connection.SSH.start_link(device: "default")
     await_shell(20)
     pid
   end
@@ -77,7 +77,7 @@ defmodule NervesMCP.Test.SSHDaemon do
   defp await_shell(0), do: raise("the test daemon's IEx never answered")
 
   defp await_shell(tries) do
-    case NervesMCP.Connection.SSH.eval("1 + 1", 1_000) do
+    case NervesMCP.Connection.SSH.eval("default", "1 + 1", 1_000) do
       {:ok, "2" <> _crlf} ->
         :ok
 

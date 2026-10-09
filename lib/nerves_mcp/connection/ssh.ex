@@ -19,6 +19,7 @@ defmodule NervesMCP.Connection.SSH do
   alias NervesMCP.Connection.AddressCache
   alias NervesMCP.Connection.EvalTemplate
   alias NervesMCP.Connection.EvalTemplate.Matcher
+  alias NervesMCP.Devices
 
   require Logger
 
@@ -42,30 +43,39 @@ defmodule NervesMCP.Connection.SSH do
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(opts) do
+    device = Keyword.fetch!(opts, :device)
+    GenServer.start_link(__MODULE__, opts, name: Devices.via(device, __MODULE__))
   end
 
-  @spec eval(String.t(), non_neg_integer()) :: result()
-  def eval(code, timeout \\ 15000) do
-    GenServer.call(__MODULE__, {:eval, code, timeout}, timeout + 1000)
+  @spec eval(Devices.name(), String.t(), non_neg_integer()) :: result()
+  def eval(device, code, timeout \\ 15000) do
+    GenServer.call(Devices.via(device, __MODULE__), {:eval, code, timeout}, timeout + 1000)
   end
 
-  @spec eval_output(String.t(), non_neg_integer()) :: result()
-  def eval_output(code, timeout \\ 15000) do
-    GenServer.call(__MODULE__, {:eval_output, code, timeout}, timeout + 1000)
+  @spec eval_output(Devices.name(), String.t(), non_neg_integer()) :: result()
+  def eval_output(device, code, timeout \\ 15000) do
+    GenServer.call(Devices.via(device, __MODULE__), {:eval_output, code, timeout}, timeout + 1000)
   end
 
   @doc "Run a raw shell command (no Elixir wrapping). Used in degraded shell mode."
-  @spec shell_eval(String.t(), non_neg_integer()) :: result()
-  def shell_eval(command, timeout \\ 15000) do
-    GenServer.call(__MODULE__, {:shell_eval, command, timeout}, timeout + 1000)
+  @spec shell_eval(Devices.name(), String.t(), non_neg_integer()) :: result()
+  def shell_eval(device, command, timeout \\ 15000) do
+    GenServer.call(
+      Devices.via(device, __MODULE__),
+      {:shell_eval, command, timeout},
+      timeout + 1000
+    )
   end
 
   @doc "Run a raw shell command and capture stdout/stderr plus exit code."
-  @spec shell_eval_output(String.t(), non_neg_integer()) :: result()
-  def shell_eval_output(command, timeout \\ 15000) do
-    GenServer.call(__MODULE__, {:shell_eval_output, command, timeout}, timeout + 1000)
+  @spec shell_eval_output(Devices.name(), String.t(), non_neg_integer()) :: result()
+  def shell_eval_output(device, command, timeout \\ 15000) do
+    GenServer.call(
+      Devices.via(device, __MODULE__),
+      {:shell_eval_output, command, timeout},
+      timeout + 1000
+    )
   end
 
   @doc """
@@ -76,29 +86,29 @@ defmodule NervesMCP.Connection.SSH do
     * `:down`         — not connected / nothing came back
     * `:busy`         — an evaluation is already in flight
   """
-  @spec probe(non_neg_integer()) :: {:ok, String.t()} | :noise | :down | :busy
-  def probe(timeout \\ 4_000) do
-    GenServer.call(__MODULE__, {:probe, timeout}, timeout + 1000)
+  @spec probe(Devices.name(), non_neg_integer()) :: {:ok, String.t()} | :noise | :down | :busy
+  def probe(device, timeout \\ 4_000) do
+    GenServer.call(Devices.via(device, __MODULE__), {:probe, timeout}, timeout + 1000)
   end
 
-  @spec attach_console(pid()) :: :ok
-  def attach_console(pid \\ self()) do
-    GenServer.call(__MODULE__, {:attach_console, pid})
+  @spec attach_console(Devices.name(), pid()) :: :ok
+  def attach_console(device, pid \\ self()) do
+    GenServer.call(Devices.via(device, __MODULE__), {:attach_console, pid})
   end
 
-  @spec detach_console() :: :ok
-  def detach_console() do
-    GenServer.call(__MODULE__, :detach_console)
+  @spec detach_console(Devices.name()) :: :ok
+  def detach_console(device) do
+    GenServer.call(Devices.via(device, __MODULE__), :detach_console)
   end
 
-  @spec send_raw(iodata()) :: :ok
-  def send_raw(data) do
-    GenServer.cast(__MODULE__, {:send_raw, data})
+  @spec send_raw(Devices.name(), iodata()) :: :ok
+  def send_raw(device, data) do
+    GenServer.cast(Devices.via(device, __MODULE__), {:send_raw, data})
   end
 
-  @spec reconnect() :: :ok | {:error, String.t()}
-  def reconnect() do
-    GenServer.call(__MODULE__, :reconnect, 10_000)
+  @spec reconnect(Devices.name()) :: :ok | {:error, String.t()}
+  def reconnect(device) do
+    GenServer.call(Devices.via(device, __MODULE__), :reconnect, 10_000)
   end
 
   @doc """
@@ -107,26 +117,28 @@ defmodule NervesMCP.Connection.SSH do
   Answers once the device on `address` has reported its hostname, or the attempt
   failed. A match is cached. The name stays primary either way.
   """
-  @spec set_address(String.t()) :: result()
-  def set_address(address) do
+  @spec set_address(Devices.name(), String.t()) :: result()
+  def set_address(device, address) do
     case :inet.parse_strict_address(String.to_charlist(address)) do
       {:ok, _ip} ->
-        timeout = connect_deadline_ms() + @verify_timeout + 1_000
-        GenServer.call(__MODULE__, {:set_address, address}, timeout)
+        timeout = connect_deadline_ms(Devices.connection(device)) + @verify_timeout + 1_000
+        GenServer.call(Devices.via(device, __MODULE__), {:set_address, address}, timeout)
 
       {:error, :einval} ->
         {:error, "#{inspect(address)} is not an IP address"}
     end
   end
 
-  @spec status() :: status()
-  def status() do
-    GenServer.call(__MODULE__, :status)
+  @spec status(Devices.name()) :: status()
+  def status(device) do
+    GenServer.call(Devices.via(device, __MODULE__), :status)
   end
 
   @impl true
-  def init(_opts) do
-    host = :nerves_mcp |> Application.get_env(:connection, []) |> Keyword.fetch!(:host)
+  def init(opts) do
+    device = Keyword.fetch!(opts, :device)
+    config = Keyword.get_lazy(opts, :connection, fn -> Devices.connection(device) end)
+    host = Keyword.fetch!(config, :host)
 
     cache_dir =
       Application.get_env(
@@ -136,6 +148,8 @@ defmodule NervesMCP.Connection.SSH do
       )
 
     state = %{
+      device: device,
+      config: config,
       port: nil,
       waiting: nil,
       console: nil,
@@ -162,7 +176,7 @@ defmodule NervesMCP.Connection.SSH do
   defp first_label(name), do: name |> String.split(".") |> hd() |> String.downcase()
 
   defp connect(state) do
-    config = Application.get_env(:nerves_mcp, :connection, [])
+    config = state.config
 
     host = target_host(state)
     user = Keyword.get(config, :user, "root")
@@ -212,7 +226,7 @@ defmodule NervesMCP.Connection.SSH do
 
       log_target(state)
       Logger.info("SSH connection started to #{user}@#{host}:#{port}")
-      Process.send_after(self(), {:connect_deadline, port_ref}, connect_deadline_ms())
+      Process.send_after(self(), {:connect_deadline, port_ref}, connect_deadline_ms(config))
       %{state | port: port_ref, data_seen?: false, verified?: state.target == :name}
     rescue
       e ->
@@ -230,11 +244,8 @@ defmodule NervesMCP.Connection.SSH do
   defp log_target(%{target: {:address, address}} = state),
     do: Logger.info("Trying address #{address} for #{state.host}")
 
-  defp connect_deadline_ms() do
-    :nerves_mcp
-    |> Application.get_env(:connection, [])
-    |> Keyword.get(:connect_deadline_ms, @connect_deadline_ms)
-  end
+  defp connect_deadline_ms(config),
+    do: Keyword.get(config, :connect_deadline_ms, @connect_deadline_ms)
 
   defp schedule_reconnect(state) do
     Logger.info("Scheduling SSH reconnection in #{state.retry_delay}ms")
@@ -396,7 +407,7 @@ defmodule NervesMCP.Connection.SSH do
 
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) do
-    NervesMCP.History.push(data)
+    NervesMCP.History.push(state.device, data)
     state = note_data(state)
 
     case state.waiting do

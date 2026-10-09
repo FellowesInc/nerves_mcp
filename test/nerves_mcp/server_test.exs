@@ -18,6 +18,7 @@ defmodule NervesMCP.ServerTest do
         "grep_ring_logger",
         "is_device_up",
         "is_device_updated_to",
+        "list_devices",
         "set_device_address"
       ])
 
@@ -39,6 +40,7 @@ defmodule NervesMCP.ServerTest do
                "grep_dmesg",
                "is_device_up",
                "is_device_updated_to",
+               "list_devices",
                "set_device_address"
              ])
   end
@@ -51,6 +53,28 @@ defmodule NervesMCP.ServerTest do
       assert NervesMCP.Tools.DeviceEvalOutput in Server.tools_for(mode)
       assert NervesMCP.Tools.GrepRingLogger in Server.tools_for(mode)
       assert NervesMCP.Tools.GrepDmesg in Server.tools_for(mode)
+    end
+  end
+
+  describe "tools_for_all/1" do
+    test "one device lists what its mode lists" do
+      for mode <- [:shell | @elixir_modes] do
+        assert Server.tools_for_all([mode]) == Server.tools_for(mode)
+      end
+    end
+
+    # The two lists share tool names, so they can't both be listed.
+    test "a shell device among Elixir ones gets the Elixir list" do
+      assert Server.tools_for_all([:shell, :nerves]) == Server.tools_for(:nerves)
+      assert Server.tools_for_all([:down, :shell]) == Server.tools_for(:nerves)
+    end
+
+    test "every device in shell gets the shell list" do
+      assert Server.tools_for_all([:shell, :shell]) == Server.tools_for(:shell)
+    end
+
+    test "no devices still lists the device tools" do
+      assert Server.tools_for_all([]) == Server.tools_for(:unknown)
     end
   end
 

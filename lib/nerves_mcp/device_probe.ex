@@ -1,7 +1,7 @@
 defmodule NervesMCP.DeviceProbe do
   @moduledoc """
-  Detects what is on the other end of the device connection and decides which
-  MCP tools should be exposed.
+  Detects what is on the other end of a device's connection and decides which
+  MCP tools should be exposed. One runs per device.
 
   When no MCP activity has happened for `idle_threshold` ms, a small probe is
   sent to the device. A device that is already `:down` or `:unknown` is probed
@@ -20,17 +20,16 @@ defmodule NervesMCP.DeviceProbe do
   Elixir degrades to `:shell` rather than reporting failure, so the server can
   still offer raw shell tools (see `NervesMCP.Tools.ShellEval`).
 
-  `NervesMCP.Server.server/0` reads `mode/0` on every request to pick the
-  `device_eval` implementation, and `NervesMCP.Tools.Device` reads it to refuse
-  calls while the device is down. On a mode change `notifications/tools/list_changed`
+  `NervesMCP.Server.server/0` reads every device's `mode/1` on each request to
+  pick the `device_eval` implementation, and `NervesMCP.Tools.Device` reads it
+  to refuse calls while the device is down. On a mode change `notifications/tools/list_changed`
   is broadcast for the clients holding an open stream.
   """
 
   use GenServer
 
   alias EMCP.Transport.StreamableHTTP
-  alias NervesMCP.Connection.SSH
-  alias NervesMCP.Connection.UART
+  alias NervesMCP.Devices
 
   require Logger
 
@@ -51,38 +50,39 @@ defmodule NervesMCP.DeviceProbe do
   # Public API
 
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(opts) do
+    device = Keyword.fetch!(opts, :device)
+    GenServer.start_link(__MODULE__, device, name: Devices.via(device, __MODULE__))
   end
 
   @doc "Current detected mode. Fast, non-blocking; falls back to `:unknown`."
-  @spec mode() :: mode()
-  def mode() do
-    GenServer.call(__MODULE__, :mode, 1_000)
+  @spec mode(Devices.name()) :: mode()
+  def mode(device) do
+    GenServer.call(Devices.via(device, __MODULE__), :mode, 1_000)
   catch
     :exit, _ -> :unknown
   end
 
   @doc "Full status map for the device_status tool."
-  @spec status() :: status()
-  def status() do
-    GenServer.call(__MODULE__, :status, 1_000)
+  @spec status(Devices.name()) :: status()
+  def status(device) do
+    GenServer.call(Devices.via(device, __MODULE__), :status, 1_000)
   catch
     :exit, _ ->
       %{mode: :unknown, detail: "probe not running", idle_ms: nil, last_probe_ms_ago: nil}
   end
 
   @doc "Record MCP activity so the idle timer does not probe during active use."
-  @spec touch() :: :ok
-  def touch() do
-    GenServer.cast(__MODULE__, :touch)
+  @spec touch(Devices.name()) :: :ok
+  def touch(device) do
+    GenServer.cast(Devices.via(device, __MODULE__), :touch)
   end
 
   @doc "Run a probe synchronously in the caller and update the cached mode."
-  @spec refresh(non_neg_integer()) :: {mode() | :busy, String.t()}
-  def refresh(timeout \\ @probe_timeout) do
-    result = run_probe(timeout)
-    GenServer.cast(__MODULE__, {:set_result, result})
+  @spec refresh(Devices.name(), non_neg_integer()) :: {mode() | :busy, String.t()}
+  def refresh(device, timeout \\ @probe_timeout) do
+    result = run_probe(device, timeout)
+    GenServer.cast(Devices.via(device, __MODULE__), {:set_result, result})
     result
   end
 
@@ -96,21 +96,22 @@ defmodule NervesMCP.DeviceProbe do
   succeeded. The cast lands on the same path a probe result does, so a mode
   change still logs and still broadcasts `tools/list_changed`.
   """
-  @spec record_eval(String.t()) :: :ok
-  def record_eval(result) when is_binary(result) do
-    GenServer.cast(__MODULE__, {:set_result, classify({:ok, result})})
+  @spec record_eval(Devices.name(), String.t()) :: :ok
+  def record_eval(device, result) when is_binary(result) do
+    GenServer.cast(Devices.via(device, __MODULE__), {:set_result, classify({:ok, result})})
   end
 
   # GenServer callbacks
 
   @impl true
-  def init(_opts) do
+  def init(device) do
     schedule_tick()
     # Start as if already idle so we probe shortly after boot.
     now = mono()
 
     {:ok,
      %{
+       device: device,
        mode: :unknown,
        detail: "not yet probed",
        last_activity: now - @idle_threshold,
@@ -192,26 +193,24 @@ defmodule NervesMCP.DeviceProbe do
 
   defp start_probe(state) do
     parent = self()
+    device = state.device
 
     {_pid, ref} =
       spawn_monitor(fn ->
-        send(parent, {:probe_result, run_probe(@probe_timeout)})
+        send(parent, {:probe_result, run_probe(device, @probe_timeout)})
       end)
 
     %{state | probing?: true, task_ref: ref}
   end
 
   @doc false
-  @spec run_probe(non_neg_integer()) :: {mode() | :busy, String.t()}
-  def run_probe(timeout) do
-    config = Application.get_env(:nerves_mcp, :connection, [])
-
+  @spec run_probe(Devices.name(), non_neg_integer()) :: {mode() | :busy, String.t()}
+  def run_probe(device, timeout) do
     raw =
       try do
-        case Keyword.get(config, :type) do
-          :uart -> UART.probe(timeout)
-          :ssh -> SSH.probe(timeout)
-          _ -> :down
+        case Devices.module(device) do
+          {:ok, module} -> module.probe(device, timeout)
+          {:error, _reason} -> :down
         end
       catch
         :exit, _ -> :down
@@ -252,7 +251,7 @@ defmodule NervesMCP.DeviceProbe do
 
   defp apply_result(state, {mode, detail}) do
     if mode != state.mode do
-      Logger.info("DeviceProbe: #{state.mode} -> #{mode} (#{detail})")
+      Logger.info("DeviceProbe #{state.device}: #{state.mode} -> #{mode} (#{detail})")
       broadcast_tools_changed()
     end
 
