@@ -120,7 +120,7 @@ defmodule NervesMCP do
   end
 
   defp wait_for_process(device, module) do
-    case GenServer.whereis(Devices.via(device, module)) do
+    case GenServer.whereis(Devices.via(device, :connection)) do
       nil ->
         Process.sleep(200)
         wait_for_process(device, module)

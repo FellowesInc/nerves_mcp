@@ -124,7 +124,7 @@ defmodule NervesMCP.CLITest do
     end
 
     test "a device name given twice is rejected" do
-      assert_raise ArgumentError, ~r/--device a is given more than once/, fn ->
+      assert_raise ArgumentError, ~r/device "a" is configured more than once/, fn ->
         CLI.configure(["--device", "a=a.local", "--device", "a=b.local"])
       end
     end

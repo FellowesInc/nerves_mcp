@@ -105,6 +105,7 @@ defmodule NervesMCP.DeviceProbe do
 
   @impl true
   def init(device) do
+    Logger.metadata(device: device)
     schedule_tick()
     # Start as if already idle so we probe shortly after boot.
     now = mono()
@@ -251,7 +252,7 @@ defmodule NervesMCP.DeviceProbe do
 
   defp apply_result(state, {mode, detail}) do
     if mode != state.mode do
-      Logger.info("DeviceProbe #{state.device}: #{state.mode} -> #{mode} (#{detail})")
+      Logger.info("DeviceProbe: #{state.mode} -> #{mode} (#{detail})")
       broadcast_tools_changed()
     end
 

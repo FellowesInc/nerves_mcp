@@ -3,8 +3,9 @@ defmodule NervesMCP.Device do
   One device's processes: its output history, its connection and its probe.
 
   Each registers under the device's name (see `NervesMCP.Devices.via/2`), so a
-  crash restarts that process for that device and leaves every other device's
-  connection alone.
+  crash stays within that device and leaves every other device's connection
+  alone. The connection writes everything the device prints to the history, and
+  the probe drives the connection, so the strategy is rest_for_one in that order.
   """
 
   use Supervisor
@@ -21,7 +22,7 @@ defmodule NervesMCP.Device do
   def init(opts) do
     name = Keyword.fetch!(opts, :name)
     connection = Keyword.fetch!(opts, :connection)
-    {:ok, module} = Devices.module(connection)
+    module = Devices.module_for(connection)
 
     Supervisor.init(
       [
@@ -29,7 +30,7 @@ defmodule NervesMCP.Device do
         {module, device: name, connection: connection},
         {NervesMCP.DeviceProbe, device: name}
       ],
-      strategy: :one_for_one
+      strategy: :rest_for_one
     )
   end
 end

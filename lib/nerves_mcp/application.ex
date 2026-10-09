@@ -19,7 +19,9 @@ defmodule NervesMCP.Application do
         # Configured, either by config.exs or by `mix nerves_mcp` parsing its
         # args before app.start. Start everything.
         devices ->
-          children(devices, Application.get_env(:nerves_mcp, :port, 13000))
+          devices
+          |> NervesMCP.Devices.validate!()
+          |> children(Application.get_env(:nerves_mcp, :port, 13000))
       end
 
     # The registry outlives the other children, which `NervesMCP.CLI` replaces. It comes first

@@ -161,7 +161,7 @@ defmodule NervesMCP.CLI do
         ]
       )
 
-    devices = resolve_devices(opts, positional)
+    devices = opts |> resolve_devices(positional) |> NervesMCP.Devices.validate!()
 
     mcp_port =
       opts
@@ -186,10 +186,7 @@ defmodule NervesMCP.CLI do
       Keyword.has_key?(opts, :device) ->
         reject_single_device!(opts, positional)
 
-        opts
-        |> Keyword.get_values(:device)
-        |> Enum.map(&parse_device!(&1, opts))
-        |> reject_duplicates!()
+        opts |> Keyword.get_values(:device) |> Enum.map(&parse_device!(&1, opts))
 
       match?([_ | _], configured) and positional == [] and
         not Keyword.has_key?(opts, :serial) and not Keyword.has_key?(opts, :ssh) ->
@@ -208,15 +205,6 @@ defmodule NervesMCP.CLI do
       raise ArgumentError,
             "--device can't be combined with a positional target, --serial or --ssh. " <>
               "Name every device with --device NAME=TARGET"
-    end
-  end
-
-  defp reject_duplicates!(devices) do
-    names = Enum.map(devices, &elem(&1, 0))
-
-    case names -- Enum.uniq(names) do
-      [] -> devices
-      [name | _] -> raise ArgumentError, "--device #{name} is given more than once"
     end
   end
 

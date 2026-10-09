@@ -80,11 +80,71 @@ defmodule NervesMCP.DevicesTest do
              "serial /dev/ttyUSB0 @ 9600"
   end
 
-  test "module/1 picks the connection for the type" do
+  test "module_for/1 picks the connection for the type" do
+    assert Devices.module_for(type: :ssh, host: "a.local") == NervesMCP.Connection.SSH
+    assert Devices.module_for(type: :uart, port: "/dev/ttyUSB0") == NervesMCP.Connection.UART
+  end
+
+  # module/1 and connection/1 answer from the running connection, not the config.
+  test "a configured device with no running connection says so" do
     configure(["a"])
 
+    assert Devices.module("a") == {:error, ~s|No connection is running for device "a"|}
+    assert Devices.connection("a") == []
+  end
+
+  test "a running connection answers with its own module and settings" do
+    connection = [type: :ssh, host: "a.local"]
+    via = Devices.connection_via("a", NervesMCP.Connection.SSH, connection)
+    start_supervised!(%{id: :a, start: {Agent, :start_link, [fn -> nil end, [name: via]]}})
+
     assert Devices.module("a") == {:ok, NervesMCP.Connection.SSH}
-    assert Devices.module(type: :uart, port: "/dev/ttyUSB0") == {:ok, NervesMCP.Connection.UART}
-    assert Devices.module("missing") == {:error, "Unknown connection type: nil"}
+    assert Devices.connection("a") == connection
+  end
+
+  describe "validate!/1" do
+    test "returns good devices" do
+      devices = [{"a", type: :ssh, host: "a.local"}, {"b", type: :uart, port: "/dev/ttyUSB0"}]
+
+      assert Devices.validate!(devices) == devices
+    end
+
+    test "rejects a name given twice" do
+      assert_raise ArgumentError, ~s|device "a" is configured more than once|, fn ->
+        Devices.validate!([{"a", type: :ssh, host: "a"}, {"a", type: :ssh, host: "b"}])
+      end
+    end
+
+    test "rejects a name that isn't a non-empty string" do
+      for name <- [:a, ""] do
+        assert_raise ArgumentError, ~r/invalid device/, fn ->
+          Devices.validate!([{name, type: :ssh, host: "a"}])
+        end
+      end
+    end
+
+    test "rejects a missing or unknown type" do
+      for connection <- [[host: "a"], [type: :usb, host: "a"]] do
+        assert_raise ArgumentError, ~r/not :ssh or :uart/, fn ->
+          Devices.validate!([{"a", connection}])
+        end
+      end
+    end
+
+    test "rejects a type without its address" do
+      assert_raise ArgumentError, ~s|device "a" has no :host|, fn ->
+        Devices.validate!([{"a", type: :ssh}])
+      end
+
+      assert_raise ArgumentError, ~s|device "b" has no :port|, fn ->
+        Devices.validate!([{"b", type: :uart}])
+      end
+    end
+
+    test "rejects settings that aren't a keyword list" do
+      assert_raise ArgumentError, ~r/needs a keyword list/, fn ->
+        Devices.validate!([{"a", %{type: :ssh}}])
+      end
+    end
   end
 end

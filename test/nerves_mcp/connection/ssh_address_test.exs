@@ -185,14 +185,16 @@ defmodule NervesMCP.Connection.SSHAddressTest do
   end
 
   defp start_ssh(host, daemon) do
-    Application.put_env(:nerves_mcp, :connection,
+    connection = [
       type: :ssh,
       host: host,
       port: daemon.port,
       user: System.get_env("USER", "nobody")
-    )
+    ]
 
-    start_supervised!({SSH, device: "default"})
+    Application.put_env(:nerves_mcp, :connection, connection)
+
+    start_supervised!({SSH, device: "default", connection: connection})
   end
 
   defp evaluates?() do

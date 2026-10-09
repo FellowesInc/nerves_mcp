@@ -24,24 +24,32 @@ defmodule NervesMCP.Connection.UART do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     device = Keyword.fetch!(opts, :device)
-    GenServer.start_link(__MODULE__, opts, name: Devices.via(device, __MODULE__))
+    connection = Keyword.fetch!(opts, :connection)
+
+    GenServer.start_link(__MODULE__, opts,
+      name: Devices.connection_via(device, __MODULE__, connection)
+    )
   end
 
   @spec eval(Devices.name(), String.t(), non_neg_integer()) :: result()
   def eval(device, code, timeout \\ 15000) do
-    GenServer.call(Devices.via(device, __MODULE__), {:eval, code, timeout}, timeout + 1000)
+    GenServer.call(Devices.via(device, :connection), {:eval, code, timeout}, timeout + 1000)
   end
 
   @spec eval_output(Devices.name(), String.t(), non_neg_integer()) :: result()
   def eval_output(device, code, timeout \\ 15000) do
-    GenServer.call(Devices.via(device, __MODULE__), {:eval_output, code, timeout}, timeout + 1000)
+    GenServer.call(
+      Devices.via(device, :connection),
+      {:eval_output, code, timeout},
+      timeout + 1000
+    )
   end
 
   @doc "Run a raw shell command (no Elixir wrapping). Used in degraded shell mode."
   @spec shell_eval(Devices.name(), String.t(), non_neg_integer()) :: result()
   def shell_eval(device, command, timeout \\ 15000) do
     GenServer.call(
-      Devices.via(device, __MODULE__),
+      Devices.via(device, :connection),
       {:shell_eval, command, timeout},
       timeout + 1000
     )
@@ -51,7 +59,7 @@ defmodule NervesMCP.Connection.UART do
   @spec shell_eval_output(Devices.name(), String.t(), non_neg_integer()) :: result()
   def shell_eval_output(device, command, timeout \\ 15000) do
     GenServer.call(
-      Devices.via(device, __MODULE__),
+      Devices.via(device, :connection),
       {:shell_eval_output, command, timeout},
       timeout + 1000
     )
@@ -67,31 +75,32 @@ defmodule NervesMCP.Connection.UART do
   """
   @spec probe(Devices.name(), non_neg_integer()) :: {:ok, String.t()} | :noise | :down | :busy
   def probe(device, timeout \\ 4_000) do
-    GenServer.call(Devices.via(device, __MODULE__), {:probe, timeout}, timeout + 1000)
+    GenServer.call(Devices.via(device, :connection), {:probe, timeout}, timeout + 1000)
   end
 
   @spec attach_console(Devices.name(), pid()) :: :ok
   def attach_console(device, pid \\ self()) do
-    GenServer.call(Devices.via(device, __MODULE__), {:attach_console, pid})
+    GenServer.call(Devices.via(device, :connection), {:attach_console, pid})
   end
 
   @spec detach_console(Devices.name()) :: :ok
   def detach_console(device) do
-    GenServer.call(Devices.via(device, __MODULE__), :detach_console)
+    GenServer.call(Devices.via(device, :connection), :detach_console)
   end
 
   @spec send_raw(Devices.name(), iodata()) :: :ok
   def send_raw(device, data) do
-    GenServer.cast(Devices.via(device, __MODULE__), {:send_raw, data})
+    GenServer.cast(Devices.via(device, :connection), {:send_raw, data})
   end
 
   @impl true
   def init(opts) do
     device = Keyword.fetch!(opts, :device)
+    Logger.metadata(device: device)
 
     state = %{
       device: device,
-      config: Keyword.get_lazy(opts, :connection, fn -> Devices.connection(device) end),
+      config: Keyword.fetch!(opts, :connection),
       uart: nil,
       connected: false,
       waiting: nil,

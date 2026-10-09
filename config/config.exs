@@ -1,5 +1,9 @@
 import Config
 
+# Every per-device process sets :device in its Logger metadata, which is what
+# tells several devices' log lines apart.
+config :logger, :default_formatter, metadata: [:device]
+
 # MCP server port (CLI --port overrides this)
 # config :nerves_mcp, :port, 13000
 
