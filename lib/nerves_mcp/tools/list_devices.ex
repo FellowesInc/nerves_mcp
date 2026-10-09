@@ -32,12 +32,5 @@ defmodule NervesMCP.Tools.ListDevices do
   end
 
   defp line({name, connection}),
-    do: "#{name}: #{target(connection)} (#{DeviceProbe.mode(name)})"
-
-  defp target(connection) do
-    case Keyword.fetch!(connection, :type) do
-      :uart -> "serial #{Keyword.fetch!(connection, :port)}"
-      :ssh -> "ssh #{Keyword.get(connection, :user, "root")}@#{Keyword.fetch!(connection, :host)}"
-    end
-  end
+    do: "#{name}: #{Devices.describe(connection)} (#{DeviceProbe.mode(name)})"
 end

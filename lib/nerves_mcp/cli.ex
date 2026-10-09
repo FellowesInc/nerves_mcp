@@ -121,13 +121,15 @@ defmodule NervesMCP.CLI do
   def announce(config) do
     case config.devices do
       [{_name, connection}] ->
-        IO.puts("NervesMCP started on port #{config.mcp_port} via #{connection_desc(connection)}")
+        IO.puts(
+          "NervesMCP started on port #{config.mcp_port} via #{NervesMCP.Devices.describe(connection)}"
+        )
 
       devices ->
         IO.puts("NervesMCP started on port #{config.mcp_port} with #{length(devices)} devices:")
 
         for {name, connection} <- devices,
-            do: IO.puts("  #{name}: #{connection_desc(connection)}")
+            do: IO.puts("  #{name}: #{NervesMCP.Devices.describe(connection)}")
     end
 
     maybe_print_claude_hint(config.mcp_port)
@@ -256,16 +258,6 @@ defmodule NervesMCP.CLI do
     raise ArgumentError,
           "invalid MCP port #{inspect(port)}, expected an integer in 1..65535 " <>
             "(--port, or :port in config/config.exs)"
-  end
-
-  defp connection_desc(connection) do
-    case Keyword.fetch!(connection, :type) do
-      :uart ->
-        "serial #{Keyword.fetch!(connection, :port)} @ #{Keyword.get(connection, :speed, 115_200)}"
-
-      :ssh ->
-        "ssh #{Keyword.get(connection, :user, "root")}@#{Keyword.fetch!(connection, :host)}:#{Keyword.get(connection, :port, 22)}"
-    end
   end
 
   defp maybe_print_claude_hint(mcp_port) do

@@ -70,6 +70,16 @@ defmodule NervesMCP.DevicesTest do
              {:error, ~s|No device named "bench". Configured: board1, board2|}
   end
 
+  test "describe/1 shows the port and the speed" do
+    assert Devices.describe(type: :ssh, host: "nerves.local", user: "root", port: 2222) ==
+             "ssh root@nerves.local:2222"
+
+    assert Devices.describe(type: :ssh, host: "nerves.local") == "ssh root@nerves.local:22"
+
+    assert Devices.describe(type: :uart, port: "/dev/ttyUSB0", speed: 9600) ==
+             "serial /dev/ttyUSB0 @ 9600"
+  end
+
   test "module/1 picks the connection for the type" do
     configure(["a"])
 

@@ -83,6 +83,19 @@ defmodule NervesMCP.Devices do
     end
   end
 
+  @doc "A device's connection as one line, e.g. `ssh root@nerves.local:22`."
+  @spec describe(keyword()) :: String.t()
+  def describe(connection) do
+    case Keyword.fetch!(connection, :type) do
+      :uart ->
+        "serial #{Keyword.fetch!(connection, :port)} @ #{Keyword.get(connection, :speed, 115_200)}"
+
+      :ssh ->
+        "ssh #{Keyword.get(connection, :user, "root")}@#{Keyword.fetch!(connection, :host)}:" <>
+          "#{Keyword.get(connection, :port, 22)}"
+    end
+  end
+
   @doc "Where a device's process for `role` is registered."
   @spec via(name(), module()) :: GenServer.name()
   def via(name, role), do: {:via, Registry, {@registry, {name, role}}}
