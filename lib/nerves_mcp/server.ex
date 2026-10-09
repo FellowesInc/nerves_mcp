@@ -53,10 +53,12 @@ defmodule NervesMCP.Server do
   `device_output` reads what the device printed into the session, which is the
   only way to see output from a process spawned by an earlier `device_eval`.
 
-  On a serial that responds but does not run Elixir, `device_eval` and
-  `device_eval_output` take a raw shell command instead, `grep_dmesg` shells out
-  to `dmesg`, and `grep_ring_logger` is not listed at all. `device_status`
-  reports which mode is in force.
+  When every device is a serial that responds but does not run Elixir,
+  `device_eval` and `device_eval_output` take a raw shell command instead,
+  `grep_dmesg` shells out to `dmesg`, and `grep_ring_logger` is not listed at
+  all. With several devices where some do run Elixir, the Elixir tools are
+  listed, and they don't work on a shell device. `device_status` reports each
+  device's mode and which tools apply to it.
   """
 
   @spec server() :: struct()
