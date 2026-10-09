@@ -22,8 +22,9 @@ defmodule NervesMCP.Application do
           children(devices, Application.get_env(:nerves_mcp, :port, 13000))
       end
 
-    # The registry outlives the other children, which `NervesMCP.CLI` replaces.
-    opts = [strategy: :one_for_one, name: NervesMCP.Supervisor]
+    # The registry outlives the other children, which `NervesMCP.CLI` replaces. It comes first
+    # and the strategy is rest_for_one, so whatever registers in it restarts after it does.
+    opts = [strategy: :rest_for_one, name: NervesMCP.Supervisor]
     Supervisor.start_link([{Registry, keys: :unique, name: NervesMCP.Registry} | children], opts)
   end
 
