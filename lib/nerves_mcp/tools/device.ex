@@ -32,12 +32,19 @@ defmodule NervesMCP.Tools.Device do
   @doc """
   Run `fun` with the device the call's `device` argument names, or the only one
   configured. An unknown name, or none with several configured, is a tool error.
+
+  The call counts as activity for that device only, so traffic to one device
+  doesn't hold off the idle probe of another that has gone quiet.
   """
   @spec with_device(map(), (Devices.name() -> term())) :: term()
   def with_device(args, fun) do
     case Devices.resolve(args["device"]) do
-      {:ok, device} -> fun.(device)
-      {:error, reason} -> EMCP.Tool.error(reason)
+      {:ok, device} ->
+        DeviceProbe.touch(device)
+        fun.(device)
+
+      {:error, reason} ->
+        EMCP.Tool.error(reason)
     end
   end
 

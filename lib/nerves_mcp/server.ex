@@ -64,7 +64,6 @@ defmodule NervesMCP.Server do
   @spec server() :: struct()
   def server() do
     devices = Devices.names()
-    Enum.each(devices, &DeviceProbe.touch/1)
 
     EMCP.Server.new(
       name: "nerves-mcp",

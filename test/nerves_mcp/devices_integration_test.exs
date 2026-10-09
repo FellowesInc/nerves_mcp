@@ -94,10 +94,21 @@ defmodule NervesMCP.DevicesIntegrationTest do
     end
   end
 
-  test "list_devices names every device with its mode" do
+  # Both daemons are on 127.0.0.1, so only the port tells them apart.
+  test "list_devices names every device with its connection and mode", %{daemons: daemons} do
     listed = text(Tools.ListDevices.call(nil, %{}))
 
-    assert listed =~ ~r/^a: ssh \S+@127\.0\.0\.1 \(elixir\)$/m
-    assert listed =~ ~r/^b: ssh \S+@127\.0\.0\.1 \(elixir\)$/m
+    for {name, daemon} <- daemons do
+      assert listed =~ ~r/^#{name}: ssh \S+@127\.0\.0\.1:#{daemon.port} \(elixir\)$/m
+    end
+  end
+
+  test "a tool call counts as activity for its own device only" do
+    Process.sleep(1_100)
+
+    Tools.DeviceStatus.call(nil, %{"device" => "a"})
+
+    assert DeviceProbe.status("a").idle_ms < 1_000
+    assert DeviceProbe.status("b").idle_ms >= 1_000
   end
 end
