@@ -8,7 +8,7 @@ defmodule NervesMCP.Connection.SSHConnectDeadlineTest do
   @moduletag timeout: 60_000
 
   setup do
-    start_supervised!(NervesMCP.History)
+    start_supervised!({NervesMCP.History, device: "default"})
     on_exit(fn -> Application.delete_env(:nerves_mcp, :connection) end)
     :ok
   end
@@ -16,14 +16,12 @@ defmodule NervesMCP.Connection.SSHConnectDeadlineTest do
   # Nothing is listening, so ssh exits 255 every time and no device output ever
   # arrives. Every attempt is then a first attempt.
   test "attempts that get no answer keep retrying host, backing off as they go" do
-    Application.put_env(:nerves_mcp, :connection,
-      type: :ssh,
-      host: "127.0.0.1",
-      port: closed_port(),
-      user: "nobody"
-    )
+    connection = [type: :ssh, host: "127.0.0.1", port: closed_port(), user: "nobody"]
 
-    log = capture_log(fn -> run_for(4_000) end)
+    log = capture_log(fn -> run_for(connection, 4_000) end)
+
+    # With several devices, the device in the metadata is what tells the lines apart.
+    assert log =~ ~r/device=default \[info\] SSH connection started/
 
     assert ["127.0.0.1", "127.0.0.1" | _] =
              logged(log, ~r/SSH connection started to nobody@(\S+):/)
@@ -35,15 +33,15 @@ defmodule NervesMCP.Connection.SSHConnectDeadlineTest do
   # a banner that never comes. That is what an mDNS name that has stopped
   # resolving looks like from here.
   test "a silent attempt is closed at the connect deadline and retried on the same host" do
-    Application.put_env(:nerves_mcp, :connection,
+    connection = [
       type: :ssh,
       host: "127.0.0.1",
       port: silent_port(),
       user: "nobody",
       connect_deadline_ms: 1_000
-    )
+    ]
 
-    log = capture_log(fn -> run_for(5_000) end)
+    log = capture_log(fn -> run_for(connection, 5_000) end)
 
     assert [_first, _second | _] =
              Regex.scan(~r/No response from the device within the connect deadline/, log)
@@ -54,8 +52,8 @@ defmodule NervesMCP.Connection.SSHConnectDeadlineTest do
     assert ["2000", "4000" | _] = logged(log, ~r/Scheduling SSH reconnection in (\d+)ms/)
   end
 
-  defp run_for(duration) do
-    pid = start_supervised!(SSH)
+  defp run_for(connection, duration) do
+    pid = start_supervised!({SSH, device: "default", connection: connection})
     Process.sleep(duration)
     stop_supervised!(SSH)
     refute Process.alive?(pid)

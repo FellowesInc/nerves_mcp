@@ -43,6 +43,23 @@ mix escript.build
 ./nerves_mcp nerves.local --user exnvr --port 4000
 ```
 
+### Several devices
+
+Name each device with `--device NAME=TARGET`, once per device. A target is a
+serial path or an SSH host, detected the same way as above, and the other
+options apply to every device:
+
+```bash
+mix nerves_mcp --device board1=192.0.2.10 --device bench=192.0.2.12 --user root
+```
+
+Every device tool then takes a `device` argument, and `list_devices` lists the
+names. With only one device configured the argument can be left out, which is
+how a single device given without `--device` runs, as the device `default`.
+
+Each device has its own connection, probe and output history, so one device
+rebooting or dropping off the network leaves the others alone.
+
 ### Options
 
 | Flag         | Description                                               | Default  |
@@ -54,6 +71,7 @@ mix escript.build
 | `--pass`     | SSH password (needs `sshpass`; not for high-security use) |          |
 | `--serial`   | Force serial mode (pass device)                           |          |
 | `--ssh`      | Force SSH mode (pass host)                                |          |
+| `--device`   | A named device, `NAME=TARGET`, repeated once per device   |          |
 | `--no-repl`  | Skip the stdin console and block instead                  |          |
 
 Short aliases: `-p` (port), `-s` (speed), `-u` (user).
@@ -89,6 +107,15 @@ config :nerves_mcp, :connection,
   host: "nerves.local",
   user: "root",
   port: 22
+```
+
+Several devices go in `:devices`, a list of `{name, connection}`:
+
+```elixir
+config :nerves_mcp, :devices, [
+  {"board1", type: :ssh, host: "192.0.2.10", user: "root", port: 22},
+  {"bench", type: :uart, port: "/dev/ttyUSB0", speed: 115_200}
+]
 ```
 
 With config in place, you can start without any arguments:
@@ -128,6 +155,14 @@ authentication and `device_eval` runs code on the connected device, so it is
 not something to expose on a network.
 
 ## MCP Tools
+
+Every tool but `list_devices` takes an optional `device`, the name of the device
+to act on. It is required when more than one device is configured.
+
+### list_devices
+
+Lists the configured devices by name, with each one's connection and the mode
+its probe last detected.
 
 ### device_eval
 

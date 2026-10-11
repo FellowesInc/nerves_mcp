@@ -74,13 +74,13 @@ defmodule NervesMCP.Tools.GrepRingLoggerTest do
 
   describe "over the harness" do
     setup do
-      start_supervised!(NervesMCP.History)
+      start_supervised!({NervesMCP.History, device: "default"})
       daemon = SSHDaemon.start()
       on_exit(fn -> SSHDaemon.stop(daemon) end)
 
       SSHDaemon.connect(daemon)
-      start_supervised!(DeviceProbe)
-      DeviceProbe.refresh()
+      start_supervised!({DeviceProbe, device: "default"})
+      DeviceProbe.refresh("default")
 
       :ok
     end

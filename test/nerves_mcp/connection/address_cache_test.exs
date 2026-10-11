@@ -5,6 +5,18 @@ defmodule NervesMCP.Connection.AddressCacheTest do
 
   @moduletag :tmp_dir
 
+  # Each device's connection learns into the same file, and they all answer at about the same
+  # time after a restart.
+  test "concurrent puts for different devices all land", %{tmp_dir: dir} do
+    path = AddressCache.path(dir)
+
+    1..30
+    |> Enum.map(&Task.async(fn -> AddressCache.put(path, "nerves-#{&1}", "192.0.2.#{&1}") end))
+    |> Task.await_many()
+
+    for n <- 1..30, do: assert(AddressCache.lookup(path, "nerves-#{n}") == "192.0.2.#{n}")
+  end
+
   test "a missing file is an empty cache", %{tmp_dir: dir} do
     assert AddressCache.lookup(AddressCache.path(dir), "nerves-1234") == nil
   end

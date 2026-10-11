@@ -13,8 +13,8 @@ defmodule NervesMCP.DeviceProbeTest do
   end
 
   test "a down device is probed even while MCP traffic keeps arriving" do
-    start_supervised!(DeviceProbe)
-    assert DeviceProbe.mode() == :unknown
+    start_supervised!({DeviceProbe, device: "default"})
+    assert DeviceProbe.mode("default") == :unknown
 
     # Constant traffic keeps the idle timer below @idle_threshold, which used to
     # hold off every probe and leave a recovered device stuck at :down.
@@ -24,17 +24,17 @@ defmodule NervesMCP.DeviceProbeTest do
   # No connection is configured, so anything that went and probed would land on
   # :down instead.
   test "a UUID the caller already read sets the mode with no probe of its own" do
-    start_supervised!(DeviceProbe)
-    assert DeviceProbe.mode() == :unknown
+    start_supervised!({DeviceProbe, device: "default"})
+    assert DeviceProbe.mode("default") == :unknown
 
-    DeviceProbe.record_eval(~s|"0123abcd"\r\n|)
+    DeviceProbe.record_eval("default", ~s|"0123abcd"\r\n|)
 
-    assert %{mode: :nerves, detail: "firmware UUID 0123abcd"} = DeviceProbe.status()
+    assert %{mode: :nerves, detail: "firmware UUID 0123abcd"} = DeviceProbe.status("default")
   end
 
   defp touch_until_probed(budget) do
     deadline = System.monotonic_time(:millisecond) + budget
-    touch_until_probed(deadline, DeviceProbe.mode())
+    touch_until_probed(deadline, DeviceProbe.mode("default"))
   end
 
   defp touch_until_probed(_deadline, :down), do: :down
@@ -43,9 +43,9 @@ defmodule NervesMCP.DeviceProbeTest do
     if System.monotonic_time(:millisecond) >= deadline do
       mode
     else
-      DeviceProbe.touch()
+      DeviceProbe.touch("default")
       Process.sleep(100)
-      touch_until_probed(deadline, DeviceProbe.mode())
+      touch_until_probed(deadline, DeviceProbe.mode("default"))
     end
   end
 end

@@ -57,14 +57,17 @@ defmodule NervesMCP.Test.SSHDaemon do
     previous = Application.fetch_env(:nerves_mcp, :connection)
     ExUnit.Callbacks.on_exit(fn -> restore_connection(previous) end)
 
-    Application.put_env(:nerves_mcp, :connection,
+    connection = [
       type: :ssh,
       host: "127.0.0.1",
       port: daemon.port,
       user: System.get_env("USER", "nobody")
-    )
+    ]
 
-    {:ok, pid} = NervesMCP.Connection.SSH.start_link([])
+    # The env names the device for tool calls; the connection takes its settings from opts.
+    Application.put_env(:nerves_mcp, :connection, connection)
+
+    {:ok, pid} = NervesMCP.Connection.SSH.start_link(device: "default", connection: connection)
     await_shell(20)
     pid
   end
@@ -77,7 +80,7 @@ defmodule NervesMCP.Test.SSHDaemon do
   defp await_shell(0), do: raise("the test daemon's IEx never answered")
 
   defp await_shell(tries) do
-    case NervesMCP.Connection.SSH.eval("1 + 1", 1_000) do
+    case NervesMCP.Connection.SSH.eval("default", "1 + 1", 1_000) do
       {:ok, "2" <> _crlf} ->
         :ok
 

@@ -75,6 +75,7 @@ defmodule NervesMCP.Tools.GrepRingLogger do
     %{
       type: :object,
       properties: %{
+        device: Device.schema(),
         pattern: %{
           type: :string,
           description: "Substring (or regex if `regex` is true) to match log lines against"
@@ -98,17 +99,19 @@ defmodule NervesMCP.Tools.GrepRingLogger do
 
   @impl EMCP.Tool
   def call(_conn, args) do
-    pattern = args["pattern"]
-    regex? = args["regex"] || false
-    tail = args["tail"]
-    timeout = args["timeout"] || 15_000
+    Device.with_device(args, fn device ->
+      pattern = args["pattern"]
+      regex? = args["regex"] || false
+      tail = args["tail"]
+      timeout = args["timeout"] || 15_000
 
-    code = build_code(pattern, regex?, tail)
+      code = build_code(pattern, regex?, tail)
 
-    case Device.eval_output(code, timeout) do
-      {:ok, output} -> EMCP.Tool.response([%{"type" => "text", "text" => output}])
-      {:error, reason} -> EMCP.Tool.error(reason)
-    end
+      case Device.eval_output(device, code, timeout) do
+        {:ok, output} -> EMCP.Tool.response([%{"type" => "text", "text" => output}])
+        {:error, reason} -> EMCP.Tool.error(reason)
+      end
+    end)
   end
 
   @doc """

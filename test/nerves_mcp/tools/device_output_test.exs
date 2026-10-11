@@ -8,13 +8,13 @@ defmodule NervesMCP.Tools.DeviceOutputTest do
   alias NervesMCP.Tools.DeviceOutput
 
   setup do
-    start_supervised!(History)
+    start_supervised!({History, device: "default"})
     daemon = SSHDaemon.start()
     on_exit(fn -> SSHDaemon.stop(daemon) end)
 
     SSHDaemon.connect(daemon)
-    start_supervised!(DeviceProbe)
-    DeviceProbe.refresh()
+    start_supervised!({DeviceProbe, device: "default"})
+    DeviceProbe.refresh("default")
 
     :ok
   end
@@ -22,7 +22,7 @@ defmodule NervesMCP.Tools.DeviceOutputTest do
   # The harness prints into the same session a device does, which is the case
   # being tested: device_eval returns the pid, the output lands 300 ms later.
   test "output from a process spawned by device_eval comes back" do
-    {_caught_up, cursor} = History.since(nil)
+    {_caught_up, cursor} = History.since("default", nil)
 
     assert %{"content" => [%{"text" => eval}]} =
              DeviceEval.call(nil, %{
@@ -43,7 +43,7 @@ defmodule NervesMCP.Tools.DeviceOutputTest do
   # The probe's own eval keeps printing into the session, so the cursor moves on
   # even when everything it consumed was protocol.
   test "a cursor with nothing after it says so and hands a cursor back" do
-    {_caught_up, cursor} = History.since(nil)
+    {_caught_up, cursor} = History.since("default", nil)
 
     assert %{"content" => [%{"text" => text}]} = DeviceOutput.call(nil, %{"cursor" => cursor})
     assert [head, next] = String.split(text, "\n\ncursor: ")

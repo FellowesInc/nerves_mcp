@@ -25,6 +25,7 @@ defmodule NervesMCP.Tools.ShellEval do
     %{
       type: :object,
       properties: %{
+        device: Device.schema(),
         command: %{type: :string, description: "Shell command to run on the device"},
         timeout: %{type: :integer, description: "Timeout in milliseconds (default: 15000)"}
       },
@@ -34,12 +35,14 @@ defmodule NervesMCP.Tools.ShellEval do
 
   @impl EMCP.Tool
   def call(_conn, args) do
-    command = args["command"]
-    timeout = args["timeout"] || 15000
+    Device.with_device(args, fn device ->
+      command = args["command"]
+      timeout = args["timeout"] || 15000
 
-    case Device.shell_eval(command, timeout) do
-      {:ok, output} -> EMCP.Tool.response([%{"type" => "text", "text" => output}])
-      {:error, reason} -> EMCP.Tool.error(reason)
-    end
+      case Device.shell_eval(device, command, timeout) do
+        {:ok, output} -> EMCP.Tool.response([%{"type" => "text", "text" => output}])
+        {:error, reason} -> EMCP.Tool.error(reason)
+      end
+    end)
   end
 end
