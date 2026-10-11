@@ -72,6 +72,17 @@ defmodule NervesMCP.DeviceProbeTest do
       shell()
       assert DeviceProbe.mode("default") == :shell
     end
+
+    test "a busy result breaks the run but keeps the mode" do
+      start_supervised!({DeviceProbe, device: "default"})
+      shell()
+      shell()
+      result({:busy, "device busy (evaluation in flight)"})
+      shell()
+
+      assert %{mode: :unknown, detail: "output but no Elixir result, 1 of 3 probes in a row"} =
+               DeviceProbe.status("default")
+    end
   end
 
   defp touch_until_probed(budget) do

@@ -257,8 +257,9 @@ defmodule NervesMCP.DeviceProbe do
   defp classify(:busy), do: {:busy, "device busy (evaluation in flight)"}
   defp classify({:error, reason}), do: {:unknown, "probe error: #{inspect(reason)}"}
 
-  # Don't overwrite a known mode just because the device was momentarily busy.
-  defp apply_result(state, {:busy, _detail}), do: state
+  # Don't overwrite a known mode just because the device was momentarily busy, but a busy
+  # result still breaks a run of shell results.
+  defp apply_result(state, {:busy, _detail}), do: %{state | shell_results: 0}
 
   defp apply_result(%{mode: mode} = state, {:shell, _detail}) when mode != :shell do
     case state.shell_results + 1 do
