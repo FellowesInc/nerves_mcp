@@ -37,6 +37,24 @@ defmodule NervesMCP.HistoryTest do
     assert {"after", _} = History.since("default", cursor)
   end
 
+  test "a byte that isn't UTF-8 becomes a replacement character" do
+    History.push("default", <<0xCF, "ok\r\n">>)
+
+    assert {"\uFFFDok", _cursor} = History.since("default", nil)
+  end
+
+  # A read, and so a cursor, can land mid-character. Neither half is valid UTF-8
+  # on its own.
+  test "a character split across two chunks survives, even with the cursor between them" do
+    <<first::binary-size(1), second::binary>> = "é"
+    History.push("default", first)
+    {_output, cursor} = History.since("default", nil)
+    History.push("default", second <> "\r\n")
+
+    assert {"é", _cursor} = History.since("default", nil)
+    assert {"é", _cursor} = History.since("default", cursor)
+  end
+
   # Captured from the harness: the PTY echoes the wrapper, redraws it once
   # unprompted, then the markers fence the result.
   test "the eval wrapper, its markers and the result it fences are filtered out" do

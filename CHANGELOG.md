@@ -63,6 +63,14 @@ All notable changes to this fork are documented here. The format follows
 
 ### Fixed
 
+- Device output that isn't valid UTF-8 no longer fails the call. A stray byte
+  on a serial console, which a reset or the wrong baud rate leaves behind, made
+  `JSON.encode!/1` raise `{:invalid_byte, 207}` on the response, and the client
+  saw only a failed POST. `device_output` kept failing until the byte rolled out
+  of the history. Invalid sequences now come back as U+FFFD, from
+  `device_output` and from everything that reads an eval's result:
+  `device_eval`, `device_eval_output`, both shell variants, `grep_dmesg`,
+  `grep_ring_logger` and the probe.
 - `--user`, `--ssh-port` and `--pass` only apply to SSH connections, and
   `--speed` only to serial. `--ssh-port` used to overwrite a serial
   connection's `:port`, which is its device path.

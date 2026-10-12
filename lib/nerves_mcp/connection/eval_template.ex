@@ -242,9 +242,15 @@ defmodule NervesMCP.Connection.EvalTemplate.Matcher do
     end
   end
 
-  defp finish(:elixir, result), do: result
+  # Device bytes go back in a JSON response, so anything that isn't UTF-8, such
+  # as line noise inside the fence or a dmesg line with a stray byte, becomes
+  # U+FFFD. Only here, on the whole result, because a chunk can end
+  # mid-character.
+  defp finish(style, result), do: tidy(style, String.replace_invalid(result))
 
-  defp finish(:shell, result) do
+  defp tidy(:elixir, result), do: result
+
+  defp tidy(:shell, result) do
     result
     |> String.replace_leading("\r\n", "")
     |> String.replace_leading("\r", "")

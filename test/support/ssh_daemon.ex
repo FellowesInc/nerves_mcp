@@ -12,14 +12,15 @@ defmodule NervesMCP.Test.SSHDaemon do
   ### API
 
     * `start/0` — start the daemon and return its port
-    * `start/1` — the same, with another shell in place of IEx
+    * `start/1` — the same, with another shell in place of IEx, or an
+      `{:ssh_cli, {module, args}}` channel in place of a shell altogether
     * `stop/1` — stop it and remove its host key
     * `connect/1` — start the SSH connection against it and wait for a live IEx
   """
 
   @type t :: %{ref: :ssh.daemon_ref(), port: :inet.port_number(), system_dir: String.t()}
 
-  @spec start({module(), atom(), list()} | function()) :: t()
+  @spec start({module(), atom(), list()} | function() | {:ssh_cli, {module(), list()}}) :: t()
   def start(shell \\ {:iex, :start, [[], {:elixir_utils, :noop, []}]}) do
     {:ok, _} = Application.ensure_all_started(:ssh)
     {:ok, _} = Application.ensure_all_started(:iex)
@@ -27,16 +28,19 @@ defmodule NervesMCP.Test.SSHDaemon do
     system_dir = host_key_dir()
 
     {:ok, ref} =
-      :ssh.daemon(:loopback, 0,
-        system_dir: to_charlist(system_dir),
-        no_auth_needed: true,
-        shell: shell
+      :ssh.daemon(
+        :loopback,
+        0,
+        [system_dir: to_charlist(system_dir), no_auth_needed: true] ++ handler(shell)
       )
 
     {:ok, info} = :ssh.daemon_info(ref)
 
     %{ref: ref, port: Keyword.fetch!(info, :port), system_dir: system_dir}
   end
+
+  defp handler({:ssh_cli, cli}), do: [ssh_cli: cli]
+  defp handler(shell), do: [shell: shell]
 
   @spec stop(t()) :: :ok
   def stop(daemon) do
