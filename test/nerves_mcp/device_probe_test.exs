@@ -32,6 +32,59 @@ defmodule NervesMCP.DeviceProbeTest do
     assert %{mode: :nerves, detail: "firmware UUID 0123abcd"} = DeviceProbe.status("default")
   end
 
+  describe "shell results" do
+    # Results land the way a probe's do. The test runs well inside the first tick, so no
+    # real probe interleaves.
+    defp result(result),
+      do: GenServer.cast(NervesMCP.Devices.via("default", DeviceProbe), {:set_result, result})
+
+    defp shell(), do: result({:shell, "serial responded but did not run Elixir"})
+
+    test "one leaves an unknown device unknown" do
+      start_supervised!({DeviceProbe, device: "default"})
+      shell()
+
+      assert %{mode: :unknown, detail: "output but no Elixir result, 1 of 3 probes in a row"} =
+               DeviceProbe.status("default")
+    end
+
+    test "three in a row switch to shell" do
+      start_supervised!({DeviceProbe, device: "default"})
+      for _ <- 1..3, do: shell()
+
+      assert DeviceProbe.mode("default") == :shell
+    end
+
+    # The bench case: a Nerves device that answers slowly once must not lose its Elixir tools.
+    test "a Nerves device keeps its mode, and an answer resets the count" do
+      start_supervised!({DeviceProbe, device: "default"})
+      DeviceProbe.record_eval("default", ~s|"0123abcd"|)
+
+      shell()
+      shell()
+      assert DeviceProbe.mode("default") == :nerves
+
+      DeviceProbe.record_eval("default", ~s|"0123abcd"|)
+      shell()
+      shell()
+      assert DeviceProbe.mode("default") == :nerves
+
+      shell()
+      assert DeviceProbe.mode("default") == :shell
+    end
+
+    test "a busy result breaks the run but keeps the mode" do
+      start_supervised!({DeviceProbe, device: "default"})
+      shell()
+      shell()
+      result({:busy, "device busy (evaluation in flight)"})
+      shell()
+
+      assert %{mode: :unknown, detail: "output but no Elixir result, 1 of 3 probes in a row"} =
+               DeviceProbe.status("default")
+    end
+  end
+
   defp touch_until_probed(budget) do
     deadline = System.monotonic_time(:millisecond) + budget
     touch_until_probed(deadline, DeviceProbe.mode("default"))

@@ -20,6 +20,14 @@ defmodule NervesMCP.DeviceProbe do
   Elixir degrades to `:shell` rather than reporting failure, so the server can
   still offer raw shell tools (see `NervesMCP.Tools.ShellEval`).
 
+  `:shell` is only ever an inference: output arrived but no Elixir result did
+  within the probe timeout, and the output can be nothing more than the echo of
+  the probe itself. A Nerves device that is slow to answer, such as one just
+  connected, looks exactly like that once. So it takes three such results in a
+  row to switch to `:shell`. Until then a device that was `:down` or `:unknown`
+  stays `:unknown`, which is probed on every tick, and one already in `:nerves`
+  or `:elixir` keeps its mode. Any other result resets the count.
+
   `NervesMCP.Server.server/0` reads every device's `mode/1` on each request to
   pick the `device_eval` implementation, and `NervesMCP.Tools.Device` reads it
   to refuse calls while the device is down. On a mode change `notifications/tools/list_changed`
@@ -37,6 +45,7 @@ defmodule NervesMCP.DeviceProbe do
   @tick 2_000
   @probe_timeout 4_000
   @recovering_modes [:down, :unknown]
+  @shell_confirmations 3
 
   @type mode() :: :nerves | :elixir | :shell | :down | :unknown
 
@@ -118,7 +127,8 @@ defmodule NervesMCP.DeviceProbe do
        last_activity: now - @idle_threshold,
        last_probe: nil,
        probing?: false,
-       task_ref: nil
+       task_ref: nil,
+       shell_results: 0
      }}
   end
 
@@ -247,10 +257,27 @@ defmodule NervesMCP.DeviceProbe do
   defp classify(:busy), do: {:busy, "device busy (evaluation in flight)"}
   defp classify({:error, reason}), do: {:unknown, "probe error: #{inspect(reason)}"}
 
-  # Don't overwrite a known mode just because the device was momentarily busy.
-  defp apply_result(state, {:busy, _detail}), do: state
+  # Don't overwrite a known mode just because the device was momentarily busy, but a busy
+  # result still breaks a run of shell results.
+  defp apply_result(state, {:busy, _detail}), do: %{state | shell_results: 0}
 
-  defp apply_result(state, {mode, detail}) do
+  defp apply_result(%{mode: mode} = state, {:shell, _detail}) when mode != :shell do
+    case state.shell_results + 1 do
+      @shell_confirmations = count ->
+        set_mode(%{state | shell_results: 0}, :shell, shell_detail(count))
+
+      count when mode in @recovering_modes ->
+        set_mode(%{state | shell_results: count}, :unknown, shell_detail(count))
+
+      count ->
+        %{state | shell_results: count}
+    end
+  end
+
+  defp apply_result(state, {mode, detail}),
+    do: set_mode(%{state | shell_results: 0}, mode, detail)
+
+  defp set_mode(state, mode, detail) do
     if mode != state.mode do
       Logger.info("DeviceProbe: #{state.mode} -> #{mode} (#{detail})")
       broadcast_tools_changed()
@@ -258,6 +285,9 @@ defmodule NervesMCP.DeviceProbe do
 
     %{state | mode: mode, detail: detail}
   end
+
+  defp shell_detail(count),
+    do: "output but no Elixir result, #{count} of #{@shell_confirmations} probes in a row"
 
   defp broadcast_tools_changed() do
     StreamableHTTP.broadcast(EMCP.SessionStore.ETS, %{
