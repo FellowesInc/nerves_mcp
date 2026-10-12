@@ -99,12 +99,18 @@ defmodule NervesMCP.History do
   # a cursor landing inside one would otherwise start the filter mid-sequence
   # and leak the rest of it: a fenced result whose START it never saw, or the
   # wrapper's trailing `:ok`.
+  #
+  # A serial console prints bytes that aren't UTF-8 around a reset or at the
+  # wrong baud rate, and the MCP response is JSON, so invalid sequences are
+  # replaced with U+FFFD. Only once the chunks are joined, because a read can
+  # end mid-character, and a cursor can too.
   defp device_output(stale, fresh) do
     stale = clean(stale)
     # A line straddling the cursor counts as fresh.
     skip = stale |> split_lines() |> length() |> Kernel.-(1)
 
     (stale <> clean(fresh))
+    |> String.replace_invalid()
     |> split_lines()
     |> Enum.with_index()
     |> Enum.reduce(@initial_state, fn {raw, index}, state ->

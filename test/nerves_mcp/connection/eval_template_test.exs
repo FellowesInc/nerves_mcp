@@ -95,6 +95,12 @@ defmodule NervesMCP.Connection.EvalTemplateTest do
                feed(matcher(), ["ABCD_START\r\n", first, second, "\r\nABCD_END\r\n"])
     end
 
+    # Line noise inside the fence, at a reset or the wrong baud rate.
+    test "a byte that isn't UTF-8 becomes a replacement character" do
+      assert {:done, "\uFFFDok\r\n"} =
+               feed(matcher(), ["ABCD_START\r\n", <<0xCF>>, "ok\r\nABCD_END\r\n"])
+    end
+
     test "the UART anchor matches the newline before the marker" do
       uart = Matcher.new("ABCD", :elixir, anchor: :leading)
 
@@ -107,6 +113,12 @@ defmodule NervesMCP.Connection.EvalTemplateTest do
       shell = Matcher.new("ABCD", :shell)
 
       assert {:done, "Linux"} = feed(shell, ["ABCD_START\r\nLinux\r\nABCD_END"])
+    end
+
+    test "a byte that isn't UTF-8 becomes a replacement character" do
+      shell = Matcher.new("ABCD", :shell)
+
+      assert {:done, "\uFFFDok"} = feed(shell, ["ABCD_START\r\n", <<0xCF, "ok\r\nABCD_END">>])
     end
   end
 
