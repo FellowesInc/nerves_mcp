@@ -21,7 +21,7 @@ NervesMCP can be run as a Mix task or as a standalone escript. The first argumen
 ### Mix task
 
 ```bash
-# Serial — auto-detected from /dev/tty* path
+# Serial — auto-detected from a /dev/ path
 mix nerves_mcp /dev/ttyUSB0
 mix nerves_mcp /dev/ttyUSB0 --speed 9600
 
@@ -133,7 +133,7 @@ mix nerves_mcp other.local     # switch to a different host entirely
 
 ### Auto-detection
 
-If the first argument starts with `/dev/tty`, `/dev/cu.`, or `/dev/serial`, it is treated as a serial device. Otherwise it is treated as an SSH host. Use `--serial` or `--ssh` to be explicit:
+If the first argument starts with `/dev/`, it is treated as a serial device, a udev symlink such as `/dev/board1-console` included. Otherwise it is treated as an SSH host. Use `--serial` or `--ssh` to be explicit:
 
 ```bash
 mix nerves_mcp --serial /dev/ttyACM0

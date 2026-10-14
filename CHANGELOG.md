@@ -60,6 +60,10 @@ All notable changes to this fork are documented here. The format follows
   findings are fixed in the code, not in `.credo.exs`.
 - `spellweaver.check` runs last in the check alias. It ends in `System.halt`, so
   anything after it never ran.
+- Any target under `/dev/` is a serial device, not only `/dev/tty*`, `/dev/cu.*`
+  and `/dev/serial*`. A udev symlink such as `/dev/board1-console` used to be
+  taken for an SSH host, and `--device` has no per-device `--serial` to force
+  it. An SSH host never starts with `/`, so no working target changes meaning.
 
 ### Fixed
 
