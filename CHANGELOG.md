@@ -64,6 +64,10 @@ All notable changes to this fork are documented here. The format follows
   and `/dev/serial*`. A udev symlink such as `/dev/board1-console` used to be
   taken for an SSH host, and `--device` has no per-device `--serial` to force
   it. An SSH host never starts with `/`, so no working target changes meaning.
+- A stop waits at most 1 s for open HTTP connections, down from
+  ThousandIsland's 15 s default. A client's `GET /mcp` event stream never ends
+  on its own, so stopping the server while one was open always took the full
+  15 s. A request still running at the stop gets the 1 s to finish.
 
 ### Fixed
 
