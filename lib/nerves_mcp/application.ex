@@ -30,6 +30,12 @@ defmodule NervesMCP.Application do
     Supervisor.start_link([{Registry, keys: :unique, name: NervesMCP.Registry} | children], opts)
   end
 
+  # How long a stop waits for open connections, down from ThousandIsland's
+  # 15_000. A client's GET /mcp event stream never ends on its own, so a stop
+  # with one open always took the full 15 s, and the client reconnects anyway.
+  # A request still running when the server stops gets this long to finish.
+  @shutdown_timeout 1_000
+
   @doc """
   A `NervesMCP.Device` per device, then the HTTP listener, so no request arrives
   before the devices it names exist.
@@ -38,7 +44,11 @@ defmodule NervesMCP.Application do
   def children(devices, port) do
     [
       {NervesMCP.Devices, devices},
-      {Bandit, plug: NervesMCP.Router, port: port, ip: :loopback}
+      {Bandit,
+       plug: NervesMCP.Router,
+       port: port,
+       ip: :loopback,
+       thousand_island_options: [shutdown_timeout: @shutdown_timeout]}
     ]
   end
 end
