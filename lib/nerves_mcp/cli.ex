@@ -32,8 +32,6 @@ defmodule NervesMCP.CLI do
   under a process supervisor.
   """
 
-  @serial_patterns ["/dev/tty", "/dev/cu.", "/dev/serial"]
-
   @typedoc "Parsed CLI configuration, as stored in the application env."
   @type config() :: %{
           devices: [NervesMCP.Devices.device()],
@@ -270,7 +268,7 @@ defmodule NervesMCP.CLI do
       Keyword.has_key?(opts, :ssh) ->
         ssh_config(Keyword.fetch!(opts, :ssh), opts, existing_config)
 
-      # First positional arg matches a serial device pattern
+      # First positional arg is a device path
       match?([_ | _], positional) and serial_device?(hd(positional)) ->
         serial_config(hd(positional), opts, existing_config)
 
@@ -357,9 +355,10 @@ defmodule NervesMCP.CLI do
   defp maybe_put(config, _key, nil), do: config
   defp maybe_put(config, key, value), do: Keyword.put(config, key, value)
 
-  defp serial_device?(path) do
-    Enum.any?(@serial_patterns, &String.starts_with?(path, &1))
-  end
+  # Any path under /dev, so a udev symlink such as /dev/board1-console is serial
+  # too. An SSH host never starts with "/", and `--device` has no per-device
+  # `--serial` to fall back on.
+  defp serial_device?(path), do: String.starts_with?(path, "/dev/")
 
   defp start_children(devices, mcp_port) do
     stop_children()

@@ -71,6 +71,13 @@ defmodule NervesMCP.CLITest do
       assert Keyword.fetch!(connection(), :port) == "/dev/ttyUSB0"
       assert Keyword.fetch!(connection(), :speed) == 9600
     end
+
+    test "any /dev/ path is uart, a udev symlink included" do
+      CLI.configure(["/dev/board1-console"])
+
+      assert Keyword.fetch!(connection(), :type) == :uart
+      assert Keyword.fetch!(connection(), :port) == "/dev/board1-console"
+    end
   end
 
   describe "configure/1 --device" do
@@ -92,6 +99,20 @@ defmodule NervesMCP.CLITest do
 
       assert Keyword.fetch!(bench, :type) == :uart
       assert Keyword.fetch!(bench, :port) == "/dev/ttyUSB0"
+    end
+
+    test "a --device target under /dev/ is uart, a udev symlink included" do
+      assert [{"board1", board1}, {"board2", board2}] =
+               CLI.configure([
+                 "--device",
+                 "board1=/dev/board1-console",
+                 "--device",
+                 "board2=/dev/serial/by-id/usb-board2-if00-port0"
+               ]).devices
+
+      assert Keyword.fetch!(board1, :type) == :uart
+      assert Keyword.fetch!(board1, :port) == "/dev/board1-console"
+      assert Keyword.fetch!(board2, :type) == :uart
     end
 
     test "a single --device keeps its name" do
