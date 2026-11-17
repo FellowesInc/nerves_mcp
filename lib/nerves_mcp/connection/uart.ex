@@ -231,11 +231,15 @@ defmodule NervesMCP.Connection.UART do
     {:reply, :busy, state}
   end
 
+  # A Nerves console run by `nbtty --wait-input` stays silent after boot until a
+  # read carries a CR, and drops everything before it along with that read. With
+  # the CR last, the probe that wakes it is dropped whole rather than half typed,
+  # and the next probe gets an answer. IEx takes it as one more empty line.
   def handle_call({:probe, timeout}, from, state) do
     marker = EvalTemplate.marker()
 
     start_call(state, from,
-      data: EvalTemplate.eval(EvalTemplate.probe_code(), marker) <> "\n\n",
+      data: EvalTemplate.eval(EvalTemplate.probe_code(), marker) <> "\n\r",
       matcher: elixir_matcher(marker),
       timeout: timeout,
       tag: :probe_timeout

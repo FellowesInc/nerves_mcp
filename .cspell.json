@@ -30,12 +30,14 @@
     "keygen",
     "exnvr",
     "lawik",
+    "nbtty",
     "nohup",
     "noproc",
     "ntoa",
     "spellweaver",
     "sshpass",
     "streamable",
+    "ttyname",
     "uart",
     "whereis"
   ]
