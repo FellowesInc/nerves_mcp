@@ -71,6 +71,11 @@ All notable changes to this fork are documented here. The format follows
 
 ### Fixed
 
+- A serial console run by `nbtty --wait-input` is no longer reported `down`
+  after every boot. nbtty drops all input and output
+  until a read carries a carriage return, and the probe only ever sent `\n`.
+  The probe now ends in `\r`. The one that wakes the console is dropped whole,
+  and the next one, a tick later, gets its answer.
 - Device output that isn't valid UTF-8 no longer fails the call. A stray byte
   on a serial console, which a reset or the wrong baud rate leaves behind, made
   `JSON.encode!/1` raise `{:invalid_byte, 207}` on the response, and the client

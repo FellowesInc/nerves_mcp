@@ -4,6 +4,9 @@ defmodule NervesMCP.Connection.UART do
 
   Sends Elixir code to the device's IEx shell and captures output.
   Automatically reconnects if the serial port is unavailable or disconnected.
+
+  The connection's `:uart_module` stands in for `Circuits.UART`, so a test can play
+  the device without a serial port.
   """
 
   use GenServer
@@ -96,11 +99,13 @@ defmodule NervesMCP.Connection.UART do
   @impl true
   def init(opts) do
     device = Keyword.fetch!(opts, :device)
+    config = Keyword.fetch!(opts, :connection)
     Logger.metadata(device: device)
 
     state = %{
       device: device,
-      config: Keyword.fetch!(opts, :connection),
+      config: config,
+      serial: Keyword.get(config, :uart_module, Circuits.UART),
       uart: nil,
       connected: false,
       waiting: nil,
@@ -121,16 +126,16 @@ defmodule NervesMCP.Connection.UART do
     uart =
       case state.uart do
         nil ->
-          {:ok, pid} = Circuits.UART.start_link()
+          {:ok, pid} = state.serial.start_link()
           pid
 
         existing ->
           # Close any existing connection before reconnecting
-          Circuits.UART.close(existing)
+          state.serial.close(existing)
           existing
       end
 
-    case Circuits.UART.open(uart, port, speed: speed, active: true) do
+    case state.serial.open(uart, port, speed: speed, active: true) do
       :ok ->
         Logger.info("UART connection opened on #{port}")
         %{state | uart: uart, connected: true, retry_delay: @initial_retry_delay}
@@ -231,11 +236,15 @@ defmodule NervesMCP.Connection.UART do
     {:reply, :busy, state}
   end
 
+  # A Nerves console run by `nbtty --wait-input` stays silent after boot until a
+  # read carries a CR, and drops everything before it along with that read. With
+  # the CR last, the probe that wakes it is dropped whole rather than half typed,
+  # and the next probe gets an answer. IEx takes it as one more empty line.
   def handle_call({:probe, timeout}, from, state) do
     marker = EvalTemplate.marker()
 
     start_call(state, from,
-      data: EvalTemplate.eval(EvalTemplate.probe_code(), marker) <> "\n\n",
+      data: EvalTemplate.eval(EvalTemplate.probe_code(), marker) <> "\n\r",
       matcher: elixir_matcher(marker),
       timeout: timeout,
       tag: :probe_timeout
@@ -248,7 +257,7 @@ defmodule NervesMCP.Connection.UART do
   end
 
   def handle_cast({:send_raw, data}, state) do
-    Circuits.UART.write(state.uart, data)
+    state.serial.write(state.uart, data)
     {:noreply, state}
   end
 
@@ -320,7 +329,7 @@ defmodule NervesMCP.Connection.UART do
     # The expression that timed out may be half typed on the device, where it
     # would swallow every later eval.
     if state.connected do
-      Circuits.UART.write(state.uart, "#iex:break\n")
+      state.serial.write(state.uart, "#iex:break\n")
     end
 
     GenServer.reply(from, {:error, "Timeout waiting for device response"})
@@ -343,7 +352,7 @@ defmodule NervesMCP.Connection.UART do
   @impl true
   def terminate(_reason, state) do
     if state.uart do
-      Circuits.UART.close(state.uart)
+      state.serial.close(state.uart)
     end
 
     :ok
@@ -356,7 +365,8 @@ defmodule NervesMCP.Connection.UART do
   end
 
   defp start_call(state, from, opts) do
-    Circuits.UART.write(state.uart, Keyword.fetch!(opts, :data))
+    data = Keyword.fetch!(opts, :data)
+    state.serial.write(state.uart, data)
 
     message = {Keyword.fetch!(opts, :tag), from}
     timer = Process.send_after(self(), message, Keyword.fetch!(opts, :timeout))
